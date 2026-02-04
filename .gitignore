@@ -1,0 +1,12 @@
+# Docker & BDD
+.env
+!.env.example
+docker-compose.override.yml
+
+# Volumes Docker 
+**/postgres_data/
+**/redis_data/
+
+# Dumps SQL temporaires
+*.dump
+*.sql.backup
