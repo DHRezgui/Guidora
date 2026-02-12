@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS users (
     first_name VARCHAR(100),
     last_name VARCHAR(100),
     role user_role NOT NULL DEFAULT 'USER',
-    is_active BOOLEAN DEFAULT true,
+    is_active BOOLEAN DEFAULT false,
     email_verified BOOLEAN DEFAULT false,
     last_login_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
