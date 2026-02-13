@@ -19,26 +19,6 @@ DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'priority_level
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'metric_type') THEN CREATE TYPE metric_type AS ENUM ('TOUR_COMPLETION', 'ABANDONMENT_RATE', 'HELP_TRIGGER', 'FAQ_SEARCH', 'SUPPORT_TICKET', 'TUTORIAL_VIEW'); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'sidebar_position') THEN CREATE TYPE sidebar_position AS ENUM ('LEFT', 'RIGHT'); END IF; END $$;
 
--- =====================================================
--- TABLE: users
--- Gestion des utilisateurs du systeme
--- =====================================================
-CREATE TABLE IF NOT EXISTS users (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    first_name VARCHAR(100),
-    last_name VARCHAR(100),
-    role user_role NOT NULL DEFAULT 'USER',
-    is_active BOOLEAN DEFAULT false,
-    email_verified BOOLEAN DEFAULT false,
-    last_login_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'users' AND indexname = 'idx_users_email') THEN CREATE INDEX idx_users_email ON users(email); END IF; END $$;
-DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'users' AND indexname = 'idx_users_role') THEN CREATE INDEX idx_users_role ON users(role); END IF; END $$;
 
 -- =====================================================
 -- TABLE: organizations
@@ -62,20 +42,29 @@ DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' 
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'organizations' AND indexname = 'idx_organizations_plan') THEN CREATE INDEX idx_organizations_plan ON organizations(plan); END IF; END $$;
 
 -- =====================================================
--- TABLE: organization_users
--- Relation many-to-many entre users et organizations
+-- TABLE: users
+-- Gestion des utilisateurs du systeme
 -- =====================================================
-CREATE TABLE IF NOT EXISTS organization_users (
+CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    first_name VARCHAR(100),
+    last_name VARCHAR(100),
     role user_role NOT NULL DEFAULT 'USER',
-    joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(organization_id, user_id)
+    organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
+    is_active BOOLEAN DEFAULT false,
+    email_verified BOOLEAN DEFAULT false,
+    last_login_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'organization_users' AND indexname = 'idx_org_users_org_id') THEN CREATE INDEX idx_org_users_org_id ON organization_users(organization_id); END IF; END $$;
-DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'organization_users' AND indexname = 'idx_org_users_user_id') THEN CREATE INDEX idx_org_users_user_id ON organization_users(user_id); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'users' AND indexname = 'idx_users_email') THEN CREATE INDEX idx_users_email ON users(email); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'users' AND indexname = 'idx_users_role') THEN CREATE INDEX idx_users_role ON users(role); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'users' AND indexname = 'idx_users_organization_id') THEN CREATE INDEX idx_users_organization_id ON users(organization_id); END IF; END $$;
+
+DROP TABLE IF EXISTS organization_users;
 
 -- =====================================================
 -- TABLE: guided_tours
