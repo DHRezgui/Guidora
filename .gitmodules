@@ -1,3 +1,6 @@
 [submodule "dashboard"]
 	path = dashboard
 	url = https://gitlab.trustdev.info/pfe2026/module-intelligent-onboarding-et-decouverte/dashboard.git
+[submodule "backend"]
+	path = backend
+	url = https://gitlab.trustdev.info/pfe2026/module-intelligent-onboarding-et-decouverte/backend.git
