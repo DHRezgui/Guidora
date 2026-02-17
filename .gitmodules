@@ -4,3 +4,6 @@
 [submodule "backend"]
 	path = backend
 	url = https://gitlab.trustdev.info/pfe2026/module-intelligent-onboarding-et-decouverte/backend.git
+[submodule "docs"]
+	path = docs
+	url = https://gitlab.trustdev.info/pfe2026/module-intelligent-onboarding-et-decouverte/docs.git
