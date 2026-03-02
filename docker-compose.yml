@@ -68,11 +68,18 @@ services:
       - DB_NAME=${DB_NAME}
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
+      - RABBITMQ_HOST=${RABBITMQ_HOST:-rabbitmq}
+      - RABBITMQ_PORT=${RABBITMQ_PORT:-5672}
+      - RABBITMQ_USER=${RABBITMQ_USER:-guest}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
       - NODE_ENV=${NODE_ENV_B}
+      - NODE_OPTIONS=--max-old-space-size=2048
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     volumes:
       - ./backend:/app
@@ -116,10 +123,31 @@ services:
       retries: 3
       start_period: 40s
 
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: trustdev-rabbitmq
+    ports:
+      - "5672:5672"  # AMQP protocol
+      - "15672:15672" # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trustdev-network
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
   pgadmin_data:
+  rabbitmq_data:
 
 networks:
   trustdev-network:
