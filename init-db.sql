@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS users (
     organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
     is_active BOOLEAN DEFAULT false,
     email_verified BOOLEAN DEFAULT false,
+    email_verification_token VARCHAR(255),
+    reset_password_token VARCHAR(255),
+    reset_password_expires TIMESTAMP WITH TIME ZONE,
     last_login_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -63,6 +66,19 @@ CREATE TABLE IF NOT EXISTS users (
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'users' AND indexname = 'idx_users_email') THEN CREATE INDEX idx_users_email ON users(email); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'users' AND indexname = 'idx_users_role') THEN CREATE INDEX idx_users_role ON users(role); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'users' AND indexname = 'idx_users_organization_id') THEN CREATE INDEX idx_users_organization_id ON users(organization_id); END IF; END $$;
+
+-- Add new columns for password reset and email verification (for existing databases)
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='email_verification_token') THEN
+    ALTER TABLE users ADD COLUMN email_verification_token VARCHAR(255);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='reset_password_token') THEN
+    ALTER TABLE users ADD COLUMN reset_password_token VARCHAR(255);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='reset_password_expires') THEN
+    ALTER TABLE users ADD COLUMN reset_password_expires TIMESTAMP WITH TIME ZONE;
+  END IF;
+END $$;
 
 DROP TABLE IF EXISTS organization_users;
 

@@ -70,6 +70,12 @@ services:
       - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
       - NODE_ENV=${NODE_ENV_B}
       - NODE_OPTIONS=--max-old-space-size=2048
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3001}
+      - MAIL_HOST=${MAIL_HOST:-smtp.gmail.com}
+      - MAIL_PORT=${MAIL_PORT:-587}
+      - MAIL_USER=${MAIL_USER}
+      - MAIL_PASSWORD=${MAIL_PASSWORD}
+      - MAIL_FROM=${MAIL_FROM:-noreply@trustdev.com}
     depends_on:
       postgres:
         condition: service_healthy

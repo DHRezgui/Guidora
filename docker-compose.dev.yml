@@ -35,6 +35,12 @@ services:
       - NODE_OPTIONS=--max-old-space-size=1024
       - REDIS_ENABLED=false
       - RABBITMQ_ENABLED=false
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3001}
+      - MAIL_HOST=${MAIL_HOST:-smtp.gmail.com}
+      - MAIL_PORT=${MAIL_PORT:-587}
+      - MAIL_USER=${MAIL_USER}
+      - MAIL_PASSWORD=${MAIL_PASSWORD}
+      - MAIL_FROM=${MAIL_FROM:-noreply@trustdev.com}
     depends_on:
       postgres:
         condition: service_healthy
