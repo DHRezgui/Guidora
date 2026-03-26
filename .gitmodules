@@ -7,3 +7,6 @@
 [submodule "docs"]
 	path = docs
 	url = https://gitlab.trustdev.info/pfe2026/module-intelligent-onboarding-et-decouverte/docs.git
+[submodule "ml"]
+	path = ml
+	url = https://gitlab.trustdev.info/pfe2026/module-intelligent-onboarding-et-decouverte/ml.git
