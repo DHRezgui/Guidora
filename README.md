@@ -1,4 +1,4 @@
-\## Environnement de Développement (Docker)
+﻿\## Environnement de Développement (Docker)
 
 
 
@@ -30,5 +30,6 @@ docker-compose up -d
 
 docker-compose ps
 
-\# ✅ Tous les services doivent afficher "Up (healthy)"
+\#  Tous les services doivent afficher "Up (healthy)"
+
 
