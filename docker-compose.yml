@@ -101,24 +101,17 @@ services:
     build:
       context: ./dashboard
       dockerfile: Dockerfile
-    command: ["npx", "next", "dev", "--hostname", "0.0.0.0", "--port", "3000"]
     ports:
       - "3003:3000"
     environment:
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
       - INTERNAL_API_URL=${INTERNAL_API_URL}
-      - NODE_ENV=development
+      - NODE_ENV=production
       - NEXT_TELEMETRY_DISABLED=1
-      - WATCHPACK_POLLING=true
-      - NODE_OPTIONS=--max-old-space-size=4096
-    mem_limit: 4g
+      - NODE_OPTIONS=--max-old-space-size=1024
     depends_on:
       backend:
         condition: service_healthy
-    volumes:
-      - ./dashboard:/app
-      - /app/node_modules
-      - /app/.next
     networks:
       - trustdev-network
     restart: unless-stopped
