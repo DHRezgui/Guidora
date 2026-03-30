@@ -79,15 +79,14 @@ services:
       - PYTHON_EXECUTABLE=/opt/venv/bin/python
       - SEMANTIC_SCRIPT_PATH=/app/ml/rag/semantic_search.py
       - FAQ_PYTHON_TIMEOUT_MS=${FAQ_PYTHON_TIMEOUT_MS:-600000}
-      - FAQ_ENFORCE_STRICT=${FAQ_ENFORCE_STRICT:-true}
-      - FAQ_STRICT_MIN_SIMILARITY=${FAQ_STRICT_MIN_SIMILARITY:-0.7}
+      - FAQ_ADAPTIVE_THRESHOLDS=${FAQ_ADAPTIVE_THRESHOLDS:-0.7,0.65,0.6}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       rabbitmq:
-        condition: service_healthy
+        condition: service_started
     networks:
       - trustdev-network
     restart: unless-stopped
