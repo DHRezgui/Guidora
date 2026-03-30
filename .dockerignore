@@ -1,0 +1,32 @@
+# Keep build context minimal for backend image builds
+*
+!backend/**
+!ml/**
+
+# Exclude heavy and generated artifacts inside kept folders
+backend/.git
+backend/.next
+backend/dist
+backend/coverage
+backend/node_modules
+backend/.env
+backend/.env.*
+
+ml/.git
+ml/.pytest_cache
+ml/__pycache__
+ml/.venv
+ml/models
+ml/notebooks
+ml/training
+ml/analysis
+ml/tests
+ml/**/__pycache__
+
+# Keep only required ML artifacts
+!ml/rag/**
+!ml/results/**
+!ml/config.py
+!ml/requirements.runtime.txt
+!ml/models/lightgbm_model.pkl
+!ml/models/feature_names.json
