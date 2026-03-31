@@ -10,3 +10,6 @@
 [submodule "ml"]
 	path = ml
 	url = https://gitlab.trustdev.info/pfe2026/module-intelligent-onboarding-et-decouverte/ml.git
+[submodule "sdks"]
+	path = sdks
+	url = https://gitlab.trustdev.info/pfe2026/module-intelligent-onboarding-et-decouverte/sdks.git
