@@ -52,8 +52,8 @@ services:
   
   backend:
     build:
-      context: .
-      dockerfile: backend/Dockerfile
+      context: ./backend
+      dockerfile: .docker/prod/Dockerfile
     ports:
       - "3002:3000"
     environment:
@@ -87,6 +87,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_started
+    volumes:
+      - ./ml:/app/ml:ro
     networks:
       - trustdev-network
     restart: unless-stopped
@@ -99,8 +101,10 @@ services:
   
   dashboard:
     build:
-      context: ./dashboard
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: dashboard/.docker/prod/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3002/api/v1}
     ports:
       - "3003:3000"
     environment:
