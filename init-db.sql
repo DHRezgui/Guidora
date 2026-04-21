@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS guided_tours (
     is_active BOOLEAN DEFAULT true,
     priority INTEGER DEFAULT 0,
     trigger_conditions JSONB DEFAULT '{}',
+    simulation_context JSONB,
     created_by UUID REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

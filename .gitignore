@@ -1,6 +1,7 @@
 
 /node_modules
 /dist
+.idea/
 # Docker & BDD
 .env
 !.env.example

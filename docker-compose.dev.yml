@@ -1,4 +1,4 @@
-# Full-stack dev (postgres + Nest backend + Next dashboard), same layout as TrustDev .docker/develop compose files.
+﻿# Full-stack dev (postgres + Nest backend + Next dashboard), same layout as TrustDev .docker/develop compose files.
 services:
   postgres:
     image: postgres:15-alpine
@@ -20,6 +20,57 @@ services:
       - trustdev-network
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trustdev-network
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - '${RABBITMQ_PORT:-5672}:5672'
+      - '${RABBITMQ_MANAGEMENT_PORT:-15672}:15672'
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ['CMD-SHELL', 'rabbitmq-diagnostics -q ping || exit 1']
+      interval: 30s
+      timeout: 30s
+      retries: 10
+      start_period: 120s
+    networks:
+      - trustdev-network
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4:7
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@trustdev.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
+    ports:
+      - '${PGADMIN_PORT:-5050}:80'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - trustdev-network
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -35,19 +86,29 @@ services:
       DB_NAME: ${DB_NAME:-onboarding}
       NODE_ENV: ${NODE_ENV_B:-development}
       NODE_OPTIONS: --max-old-space-size=1024
-      REDIS_ENABLED: 'false'
-      RABBITMQ_ENABLED: 'false'
+      REDIS_ENABLED: 'true'
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      RABBITMQ_ENABLED: 'true'
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: '5672'
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      PYTHON_EXECUTABLE: /usr/bin/python3
+      SEMANTIC_SCRIPT_PATH: /app/ml/rag/semantic_search.py
+      FAQ_PYTHON_TIMEOUT_MS: ${FAQ_PYTHON_TIMEOUT_MS:-600000}
+      FAQ_ADAPTIVE_THRESHOLDS: ${FAQ_ADAPTIVE_THRESHOLDS:-0.7,0.65,0.6}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3021}
-      MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
-      MAIL_PORT: ${MAIL_PORT:-587}
-      MAIL_USER: ${MAIL_USER:-}
-      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
-      MAIL_FROM: ${MAIL_FROM:-noreply@trustdev.com}
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     volumes:
       - ./backend:/app
+      - ./ml:/app/ml:ro
       - /app/node_modules
     networks:
       - trustdev-network
@@ -85,6 +146,9 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
+  rabbitmq_data:
+  pgadmin_data:
 
 networks:
   trustdev-network:
