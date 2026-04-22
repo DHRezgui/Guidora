@@ -73,8 +73,8 @@ services:
 
   backend:
     build:
-      context: ./backend
-      dockerfile: .docker/develop/Dockerfile
+      context: .
+      dockerfile: backend/.docker/develop/Dockerfile
     env_file: ./backend/.docker/develop/.env
     ports:
       - '${BACKEND_HOST_PORT:-3020}:3000'
@@ -94,7 +94,7 @@ services:
       RABBITMQ_PORT: '5672'
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
-      PYTHON_EXECUTABLE: /usr/bin/python3
+      PYTHON_EXECUTABLE: python3
       SEMANTIC_SCRIPT_PATH: /app/ml/rag/semantic_search.py
       FAQ_PYTHON_TIMEOUT_MS: ${FAQ_PYTHON_TIMEOUT_MS:-600000}
       FAQ_ADAPTIVE_THRESHOLDS: ${FAQ_ADAPTIVE_THRESHOLDS:-0.7,0.65,0.6}
