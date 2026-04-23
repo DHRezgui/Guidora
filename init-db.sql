@@ -117,6 +117,7 @@ CREATE TABLE IF NOT EXISTS steps (
     title VARCHAR(255) NOT NULL,
     content TEXT NOT NULL,
     target_selector VARCHAR(500),
+    step_target_url VARCHAR(500),
     position position_type DEFAULT 'BOTTOM',
     action action_type DEFAULT 'NEXT',
     skip_allowed BOOLEAN DEFAULT true,
@@ -131,6 +132,9 @@ CREATE TABLE IF NOT EXISTS steps (
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='steps' AND column_name='step_type') THEN
         ALTER TABLE steps ADD COLUMN step_type step_type DEFAULT 'highlight';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='steps' AND column_name='step_target_url') THEN
+        ALTER TABLE steps ADD COLUMN step_target_url VARCHAR(500);
     END IF;
 END $$;
 
