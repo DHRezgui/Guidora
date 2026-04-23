@@ -12,6 +12,7 @@ DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') TH
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'plan_type') THEN CREATE TYPE plan_type AS ENUM ('FREE', 'STARTER', 'PRO', 'ENTERPRISE'); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'position_type') THEN CREATE TYPE position_type AS ENUM ('TOP', 'BOTTOM', 'LEFT', 'RIGHT', 'CENTER', 'TOP_LEFT', 'TOP_RIGHT', 'BOTTOM_LEFT', 'BOTTOM_RIGHT'); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'action_type') THEN CREATE TYPE action_type AS ENUM ('CLICK', 'HOVER', 'SCROLL', 'NEXT', 'SKIP', 'COMPLETE'); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'step_type') THEN CREATE TYPE step_type AS ENUM ('tooltip', 'highlight', 'modal', 'form', 'tutorial', 'checklist'); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'event_type') THEN CREATE TYPE event_type AS ENUM ('PAGE_VIEW', 'CLICK', 'SCROLL', 'HOVER', 'EXIT', 'FORM_SUBMIT', 'ERROR'); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'progress_status') THEN CREATE TYPE progress_status AS ENUM ('NOT_STARTED', 'IN_PROGRESS', 'COMPLETED', 'ABANDONED'); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ticket_status') THEN CREATE TYPE ticket_status AS ENUM ('OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'); END IF; END $$;
@@ -120,10 +121,18 @@ CREATE TABLE IF NOT EXISTS steps (
     action action_type DEFAULT 'NEXT',
     skip_allowed BOOLEAN DEFAULT true,
     highlight_element BOOLEAN DEFAULT true,
+    step_type step_type DEFAULT 'highlight',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(tour_id, order_index)
 );
+
+-- Add step_type for existing databases
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='steps' AND column_name='step_type') THEN
+        ALTER TABLE steps ADD COLUMN step_type step_type DEFAULT 'highlight';
+    END IF;
+END $$;
 
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'steps' AND indexname = 'idx_steps_tour_id') THEN CREATE INDEX idx_steps_tour_id ON steps(tour_id); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'steps' AND indexname = 'idx_steps_order') THEN CREATE INDEX idx_steps_order ON steps(tour_id, order_index); END IF; END $$;
