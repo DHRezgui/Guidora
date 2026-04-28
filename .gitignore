@@ -2,6 +2,7 @@
 /node_modules
 /dist
 .idea/
+.cursor/
 # Docker & BDD
 .env
 !.env.example
