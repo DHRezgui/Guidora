@@ -13,6 +13,9 @@ DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'plan_type') TH
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'position_type') THEN CREATE TYPE position_type AS ENUM ('TOP', 'BOTTOM', 'LEFT', 'RIGHT', 'CENTER', 'TOP_LEFT', 'TOP_RIGHT', 'BOTTOM_LEFT', 'BOTTOM_RIGHT'); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'action_type') THEN CREATE TYPE action_type AS ENUM ('CLICK', 'HOVER', 'SCROLL', 'NEXT', 'SKIP', 'COMPLETE'); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'step_type') THEN CREATE TYPE step_type AS ENUM ('tooltip', 'highlight', 'modal', 'form', 'tutorial', 'checklist'); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tour_user_state_status') THEN CREATE TYPE tour_user_state_status AS ENUM ('DISMISSED', 'COMPLETED', 'ELIGIBLE'); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tour_replay_policy') THEN CREATE TYPE tour_replay_policy AS ENUM ('never', 'after_period', 'always_on_new_version'); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid WHERE t.typname = 'tour_user_state_status' AND e.enumlabel = 'ELIGIBLE') THEN ALTER TYPE tour_user_state_status ADD VALUE 'ELIGIBLE'; END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'event_type') THEN CREATE TYPE event_type AS ENUM ('PAGE_VIEW', 'CLICK', 'SCROLL', 'HOVER', 'EXIT', 'FORM_SUBMIT', 'ERROR'); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'progress_status') THEN CREATE TYPE progress_status AS ENUM ('NOT_STARTED', 'IN_PROGRESS', 'COMPLETED', 'ABANDONED'); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ticket_status') THEN CREATE TYPE ticket_status AS ENUM ('OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'); END IF; END $$;
@@ -97,14 +100,69 @@ CREATE TABLE IF NOT EXISTS guided_tours (
     priority INTEGER DEFAULT 0,
     trigger_conditions JSONB DEFAULT '{}',
     simulation_context JSONB,
+    replay_policy tour_replay_policy NOT NULL DEFAULT 'never',
+    replay_after_days INTEGER NOT NULL DEFAULT 0,
+    current_reset_version INTEGER NOT NULL DEFAULT 0,
     created_by UUID REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='replay_policy') THEN
+    ALTER TABLE guided_tours ADD COLUMN replay_policy tour_replay_policy NOT NULL DEFAULT 'never';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='replay_after_days') THEN
+    ALTER TABLE guided_tours ADD COLUMN replay_after_days INTEGER NOT NULL DEFAULT 0;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='current_reset_version') THEN
+    ALTER TABLE guided_tours ADD COLUMN current_reset_version INTEGER NOT NULL DEFAULT 0;
+  END IF;
+END $$;
 
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'guided_tours' AND indexname = 'idx_tours_org_id') THEN CREATE INDEX idx_tours_org_id ON guided_tours(organization_id); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'guided_tours' AND indexname = 'idx_tours_active') THEN CREATE INDEX idx_tours_active ON guided_tours(is_active); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'guided_tours' AND indexname = 'idx_tours_target_url') THEN CREATE INDEX idx_tours_target_url ON guided_tours(target_url); END IF; END $$;
+
+-- =====================================================
+-- TABLE: tour_user_states
+-- Etat du parcours par utilisateur (dismissed/completed)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS tour_user_states (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tour_id UUID NOT NULL REFERENCES guided_tours(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    status tour_user_state_status NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    next_eligible_at TIMESTAMP WITH TIME ZONE,
+    reset_version INTEGER NOT NULL DEFAULT 0,
+    seen_count INTEGER NOT NULL DEFAULT 0,
+    last_seen_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT uq_tour_user_states_tour_user UNIQUE (tour_id, user_id)
+);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tour_user_states' AND column_name='expires_at') THEN
+    ALTER TABLE tour_user_states ADD COLUMN expires_at TIMESTAMP WITH TIME ZONE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tour_user_states' AND column_name='next_eligible_at') THEN
+    ALTER TABLE tour_user_states ADD COLUMN next_eligible_at TIMESTAMP WITH TIME ZONE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tour_user_states' AND column_name='reset_version') THEN
+    ALTER TABLE tour_user_states ADD COLUMN reset_version INTEGER NOT NULL DEFAULT 0;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tour_user_states' AND column_name='seen_count') THEN
+    ALTER TABLE tour_user_states ADD COLUMN seen_count INTEGER NOT NULL DEFAULT 0;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tour_user_states' AND column_name='last_seen_at') THEN
+    ALTER TABLE tour_user_states ADD COLUMN last_seen_at TIMESTAMP WITH TIME ZONE;
+  END IF;
+END $$;
+
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'tour_user_states' AND indexname = 'idx_tour_user_states_org_user') THEN CREATE INDEX idx_tour_user_states_org_user ON tour_user_states(organization_id, user_id); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'tour_user_states' AND indexname = 'idx_tour_user_states_tour_id') THEN CREATE INDEX idx_tour_user_states_tour_id ON tour_user_states(tour_id); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'tour_user_states' AND indexname = 'idx_tour_user_states_next_eligible_at') THEN CREATE INDEX idx_tour_user_states_next_eligible_at ON tour_user_states(next_eligible_at); END IF; END $$;
 
 -- =====================================================
 -- TABLE: steps
@@ -409,6 +467,7 @@ $$ language 'plpgsql';
 DROP TRIGGER IF EXISTS update_users_updated_at ON users; CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 DROP TRIGGER IF EXISTS update_organizations_updated_at ON organizations; CREATE TRIGGER update_organizations_updated_at BEFORE UPDATE ON organizations FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 DROP TRIGGER IF EXISTS update_guided_tours_updated_at ON guided_tours; CREATE TRIGGER update_guided_tours_updated_at BEFORE UPDATE ON guided_tours FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_tour_user_states_updated_at ON tour_user_states; CREATE TRIGGER update_tour_user_states_updated_at BEFORE UPDATE ON tour_user_states FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 DROP TRIGGER IF EXISTS update_steps_updated_at ON steps; CREATE TRIGGER update_steps_updated_at BEFORE UPDATE ON steps FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 DROP TRIGGER IF EXISTS update_user_progress_updated_at ON user_progress; CREATE TRIGGER update_user_progress_updated_at BEFORE UPDATE ON user_progress FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 DROP TRIGGER IF EXISTS update_sidebars_updated_at ON sidebars; CREATE TRIGGER update_sidebars_updated_at BEFORE UPDATE ON sidebars FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
