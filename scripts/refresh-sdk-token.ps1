@@ -7,6 +7,12 @@ param(
 
   [string]$ApiBaseUrl = "http://localhost:3020/api/v1",
 
+  [int]$MaxRetries = 4,
+
+  [int]$RetryDelayMs = 1200,
+
+  [string]$TestProject = "test_1",
+
   [string]$EnvFilePath = "..\..\e2e_sdk_tests\react\test_1\.env.local"
 )
 
@@ -70,8 +76,42 @@ function Upsert-EnvValue(
   Set-Content -Path $FilePath -Value $lines -Encoding UTF8
 }
 
+function Invoke-LoginWithRetry(
+  [string]$Url,
+  [string]$JsonBody,
+  [int]$Attempts,
+  [int]$DelayMs
+) {
+  $lastError = $null
+  for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+    try {
+      return Invoke-RestMethod `
+        -Uri $Url `
+        -Method Post `
+        -ContentType "application/json" `
+        -Body $JsonBody
+    }
+    catch {
+      $lastError = $_
+      if ($attempt -lt $Attempts) {
+        Write-Warning "Login attempt $attempt/$Attempts a echoue: $($_.Exception.Message)"
+        Start-Sleep -Milliseconds ($DelayMs * $attempt)
+      }
+    }
+  }
+
+  if ($null -ne $lastError) {
+    throw $lastError.Exception
+  }
+  throw "Echec login API sans details."
+}
+
 try {
-  $resolvedEnvPath = Resolve-ProjectPath $EnvFilePath
+  $resolvedEnvPath = if ($PSBoundParameters.ContainsKey("EnvFilePath")) {
+    Resolve-ProjectPath $EnvFilePath
+  } else {
+    Resolve-ProjectPath "..\..\e2e_sdk_tests\react\$TestProject\.env.local"
+  }
   $loginUrl = "$($ApiBaseUrl.TrimEnd('/'))/auth/login"
 
   Write-Host "Login API: $loginUrl"
@@ -82,11 +122,11 @@ try {
     password = $Password
   } | ConvertTo-Json
 
-  $response = Invoke-RestMethod `
-    -Uri $loginUrl `
-    -Method Post `
-    -ContentType "application/json" `
-    -Body $body
+  $response = Invoke-LoginWithRetry `
+    -Url $loginUrl `
+    -JsonBody $body `
+    -Attempts ([Math]::Max(1, $MaxRetries)) `
+    -DelayMs ([Math]::Max(200, $RetryDelayMs))
 
   $token = Extract-Token $response
   if ([string]::IsNullOrWhiteSpace($token)) {
