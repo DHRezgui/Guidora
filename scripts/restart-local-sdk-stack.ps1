@@ -8,6 +8,8 @@ param(
   [switch]$FallbackToDevOnProdBuildFailure = $true,
   [int]$AppPort = 3000,
   [switch]$KillBackendPort3020,
+  [switch]$SkipSdkInit,
+  [switch]$ForceSdkInit,
   [switch]$StartTunnel = $true,
   [string]$TunnelCommand = "npx --yes tunnelmole 3000"
 )
@@ -87,6 +89,48 @@ function Enable-SystemCAForNode {
   Write-Host "NODE_OPTIONS actif: $env:NODE_OPTIONS"
 }
 
+function Test-TrustDevSdkInitialized([string]$TestAppDir) {
+  $componentPath = Join-Path $TestAppDir "components\trustdev\trustdev-onboarding.tsx"
+  $envPath = Join-Path $TestAppDir ".env.local"
+  $layoutCandidates = @(
+    (Join-Path $TestAppDir "app\layout.tsx"),
+    (Join-Path $TestAppDir "src\app\layout.tsx")
+  )
+  $layoutPath = $layoutCandidates | Where-Object { Test-Path -Path $_ -PathType Leaf } | Select-Object -First 1
+
+  if (-not (Test-Path -Path $componentPath -PathType Leaf)) { return $false }
+  if (-not (Test-Path -Path $envPath -PathType Leaf)) { return $false }
+  if (-not $layoutPath) { return $false }
+
+  $componentContent = Get-Content -Path $componentPath -Raw
+  $envContent = Get-Content -Path $envPath -Raw
+  $layoutContent = Get-Content -Path $layoutPath -Raw
+
+  $componentReady =
+    $componentContent -match "export\s+function\s+TrustdevOnboarding" -and
+    $componentContent -match "TourViewer"
+
+  $layoutReady =
+    $layoutContent -match "TrustdevOnboarding" -and
+    $layoutContent -match "<TrustdevOnboarding\s*/>"
+
+  $requiredEnvKeys = @(
+    "NEXT_PUBLIC_TRUSTDEV_API_URL",
+    "NEXT_PUBLIC_TRUSTDEV_API_KEY",
+    "NEXT_PUBLIC_TRUSTDEV_ORGANIZATION_ID",
+    "NEXT_PUBLIC_TRUSTDEV_SDK_TOKEN"
+  )
+  $envReady = $true
+  foreach ($key in $requiredEnvKeys) {
+    if ($envContent -notmatch "(?m)^\s*$key\s*=") {
+      $envReady = $false
+      break
+    }
+  }
+
+  return ($componentReady -and $layoutReady -and $envReady)
+}
+
 try {
   $repoRoot = Resolve-FromScripts ".."
   $sdkReactDir = Resolve-FromScripts "..\sdks\react"
@@ -123,11 +167,6 @@ try {
     if (-not (Test-PortListening -Port 3020)) {
       throw "Le backend API (port 3020) n'est pas demarre. Demarre-le puis relance le script avec -RefreshToken."
     }
-
-    Invoke-Step "Refresh token SDK" {
-      & $tokenScriptPath -Email $Email -Password $Password -TestProject $TestProject
-      if (-not $?) { throw "Echec refresh-sdk-token.ps1" }
-    }
   }
 
   Invoke-Step "Build + pack SDK React local" {
@@ -149,6 +188,43 @@ try {
       if ($LASTEXITCODE -ne 0) { throw "npm install tgz a echoue." }
     } finally {
       Pop-Location
+    }
+  }
+
+  $sdkAlreadyInitialized = Test-TrustDevSdkInitialized -TestAppDir $testAppDir
+
+  if ($SkipSdkInit) {
+    Write-Host ""
+    Write-Host "==> Initialisation TrustDev SDK ignoree (-SkipSdkInit)"
+  } elseif ($sdkAlreadyInitialized -and -not $ForceSdkInit) {
+    Write-Host ""
+    Write-Host "==> Initialisation TrustDev SDK deja faite pour $TestProject (skip automatique)"
+    Write-Host "Astuce: utilise -ForceSdkInit pour relancer l'init volontairement."
+  } else {
+    Invoke-Step "Initialisation TrustDev SDK dans $TestProject" {
+      $localInitScript = Join-Path $testAppDir "node_modules\@trustdev\onboarding-sdk-react\scripts\init.js"
+      $sourceInitScript = Join-Path $sdkReactDir "scripts\init.js"
+      $initScript = if (Test-Path -Path $localInitScript -PathType Leaf) { $localInitScript } else { $sourceInitScript }
+
+      if (-not (Test-Path -Path $initScript -PathType Leaf)) {
+        throw "Script init TrustDev introuvable. Attendu: $localInitScript"
+      }
+
+      Push-Location $testAppDir
+      try {
+        Write-Host "Lancement init local: node `"$initScript`""
+        node $initScript
+        if ($LASTEXITCODE -ne 0) { throw "trustdev init a echoue." }
+      } finally {
+        Pop-Location
+      }
+    }
+  }
+
+  if ($RefreshToken) {
+    Invoke-Step "Refresh token SDK" {
+      & $tokenScriptPath -Email $Email -Password $Password -TestProject $TestProject
+      if (-not $?) { throw "Echec refresh-sdk-token.ps1" }
     }
   }
 
