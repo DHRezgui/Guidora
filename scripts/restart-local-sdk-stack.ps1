@@ -1,3 +1,22 @@
+<#
+.SYNOPSIS
+  Build SDK, (re)init test app, refresh token, start Next.js + optional tunnel.
+
+.EXAMPLE
+  # Heuristique + singlePageTour (test_9 / test_10)
+  .\restart-local-sdk-stack.ps1 -TestProject test_10 -SdkInitMode heuristic -SinglePageTour `
+    -RefreshToken -Email "you@example.com" -Password "secret"
+
+.EXAMPLE
+  # Blueprints (test_6)
+  .\restart-local-sdk-stack.ps1 -TestProject test_6 -SdkInitMode blueprints -BlueprintPack fintech `
+    -RefreshToken -Email "you@example.com" -Password "secret"
+
+.EXAMPLE
+  # Relance sans re-init (projet deja configure)
+  .\restart-local-sdk-stack.ps1 -TestProject test_10 -SdkInitMode heuristic -SinglePageTour -SkipSdkInit `
+    -RefreshToken -Email "you@example.com" -Password "secret"
+#>
 param(
   [switch]$RefreshToken,
   [string]$Email,
@@ -10,12 +29,21 @@ param(
   [switch]$KillBackendPort3020,
   [switch]$SkipSdkInit,
   [switch]$ForceSdkInit,
+  [ValidateSet("", "heuristic", "blueprints")]
+  [string]$SdkInitMode = "",
+  [ValidateSet("fintech", "healthtech", "tech", "hr", "social", "elearning", "realestate", "multi-vertical")]
+  [string]$BlueprintPack = "fintech",
+  [switch]$SinglePageTour,
+  [string]$ProjectDomain = "",
   [switch]$StartTunnel = $true,
   [string]$TunnelCommand = "npx --yes tunnelmole 3000"
 )
 
 $ErrorActionPreference = "Stop"
-$script:ScriptRoot = if ($PSScriptRoot) { $PSScriptRoot } elseif ($PSCommandPath) { Split-Path -Parent $PSCommandPath } else { (Get-Location).Path }
+if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+  throw "PSScriptRoot indisponible. Lance ce script avec: powershell -File `"chemin\restart-local-sdk-stack.ps1`" -TestProject test_11 ..."
+}
+$script:ScriptRoot = $PSScriptRoot
 
 function Resolve-FromScripts([string]$RelativePath) {
   return [System.IO.Path]::GetFullPath((Join-Path $script:ScriptRoot $RelativePath))
@@ -89,6 +117,62 @@ function Enable-SystemCAForNode {
   Write-Host "NODE_OPTIONS actif: $env:NODE_OPTIONS"
 }
 
+function Build-TrustDevInitArgs(
+  [string]$Mode,
+  [string]$Pack,
+  [switch]$SinglePageTour,
+  [string]$ProjectDomain,
+  [string]$TargetDir,
+  [switch]$NonInteractive
+) {
+  $initArgs = @()
+  if ($NonInteractive) { $initArgs += "--yes" }
+  if (-not [string]::IsNullOrWhiteSpace($TargetDir)) {
+    $initArgs += "--target-dir=$TargetDir"
+  }
+  if (-not [string]::IsNullOrWhiteSpace($Mode)) {
+    $initArgs += "--mode=$Mode"
+    if ($Mode -eq "blueprints" -and -not [string]::IsNullOrWhiteSpace($Pack)) {
+      $initArgs += "--pack=$Pack"
+    }
+    if ($Mode -eq "heuristic") {
+      if ($SinglePageTour) { $initArgs += "--single-page-tour" }
+      if (-not [string]::IsNullOrWhiteSpace($ProjectDomain)) {
+        $initArgs += "--project-domain=$ProjectDomain"
+      }
+    }
+  }
+  return $initArgs
+}
+
+function Format-CmdExeChain([string]$WorkDir, [string]$Command) {
+  return ('cd /d "{0}" && {1}' -f $WorkDir, $Command)
+}
+
+function Get-TrustDevInitProfileLabel(
+  [string]$Mode,
+  [string]$Pack,
+  [bool]$SinglePageTour
+) {
+  $label = $Mode
+  if ($Mode -eq "blueprints") { $label += " / $Pack" }
+  if ($SinglePageTour -and $Mode -eq "heuristic") { $label += " / singlePageTour" }
+  return $label
+}
+
+function Write-TrustDevStackMarker([string]$TestAppDir, [string]$TestProject, [string]$SdkInitMode) {
+  $markerPath = Join-Path $TestAppDir ".trustdev-stack.json"
+  $flowSlug = ($TestProject -replace '_', '-').ToLowerInvariant()
+  $flowVersionHint = if ($SdkInitMode -eq "heuristic" -and $SinglePageTour) { "$flowSlug-single-v1" } elseif ($SdkInitMode -eq "heuristic") { "$flowSlug-v1" } else { "$flowSlug-blueprints-v1" }
+  $marker = @{
+    testProject = $TestProject
+    sdkInitMode = $SdkInitMode
+    flowVersionHint = $flowVersionHint
+    updatedAt = (Get-Date).ToString("o")
+  } | ConvertTo-Json -Depth 3
+  Set-Content -Path $markerPath -Value $marker -Encoding UTF8
+}
+
 function Test-TrustDevSdkInitialized([string]$TestAppDir) {
   $componentPath = Join-Path $TestAppDir "components\trustdev\trustdev-onboarding.tsx"
   $envPath = Join-Path $TestAppDir ".env.local"
@@ -134,14 +218,27 @@ function Test-TrustDevSdkInitialized([string]$TestAppDir) {
 try {
   $repoRoot = Resolve-FromScripts ".."
   $sdkReactDir = Resolve-FromScripts "..\sdks\react"
-  $testAppDir = Resolve-FromScripts "..\..\e2e_sdk_tests\react\$TestProject"
+  $testAppDirCandidate = Resolve-FromScripts "..\..\e2e_sdk_tests\react\$TestProject"
+  if (-not (Test-Path -LiteralPath $testAppDirCandidate -PathType Container)) {
+    throw "Projet de test introuvable: '$TestProject' (chemin resolu: $testAppDirCandidate)."
+  }
+  $testAppDir = (Resolve-Path -LiteralPath $testAppDirCandidate).Path
+  $testAppLeaf = Split-Path -Leaf $testAppDir
+  if ($testAppLeaf -ne $TestProject) {
+    throw "Mismatch TestProject: parametre '$TestProject' mais dossier resolu '$testAppLeaf' ($testAppDir)."
+  }
+
   $tokenScriptPath = Resolve-FromScripts ".\refresh-sdk-token.ps1"
   $sdkTgzPath = Join-Path $sdkReactDir "trustdev-onboarding-sdk-react-0.1.0.tgz"
+  $trustdevComponentPath = Join-Path $testAppDir "components\trustdev\trustdev-onboarding.tsx"
   $effectiveAppMode = $AppMode
 
-  if (-not (Test-Path -Path $testAppDir -PathType Container)) {
-    throw "Projet de test introuvable: '$TestProject' (chemin resolu: $testAppDir)."
-  }
+  Write-Host ""
+  Write-Host "Projet cible: $TestProject"
+  Write-Host "Dossier absolu: $testAppDir"
+  Write-Host "Fichier init: $trustdevComponentPath"
+  Write-Host "URL locale: http://localhost:$AppPort"
+  Write-Host "Astuce: tous les tests partagent la meme org API - chaque projet doit avoir un flowVersion distinct (filtre SDK)."
 
   Invoke-Step "Activation Node CA systeme" {
     Enable-SystemCAForNode
@@ -165,7 +262,7 @@ try {
       throw "Utilise -Email et -Password quand -RefreshToken est active."
     }
     if (-not (Test-PortListening -Port 3020)) {
-      throw "Le backend API (port 3020) n'est pas demarre. Demarre-le puis relance le script avec -RefreshToken."
+      throw "Le backend API (port 3020) nest pas demarre. Demarre-le puis relance le script avec -RefreshToken."
     }
   }
 
@@ -184,7 +281,7 @@ try {
   Invoke-Step "Reinstall SDK dans $TestProject" {
     Push-Location $testAppDir
     try {
-      npm install $sdkTgzPath
+      npm install --force $sdkTgzPath
       if ($LASTEXITCODE -ne 0) { throw "npm install tgz a echoue." }
     } finally {
       Pop-Location
@@ -199,27 +296,43 @@ try {
   } elseif ($sdkAlreadyInitialized -and -not $ForceSdkInit) {
     Write-Host ""
     Write-Host "==> Initialisation TrustDev SDK deja faite pour $TestProject (skip automatique)"
-    Write-Host "Astuce: utilise -ForceSdkInit pour relancer l'init volontairement."
+    Write-Host "Astuce: utilise -ForceSdkInit pour relancer init volontairement."
   } else {
     Invoke-Step "Initialisation TrustDev SDK dans $TestProject" {
       $localInitScript = Join-Path $testAppDir "node_modules\@trustdev\onboarding-sdk-react\scripts\init.js"
       $sourceInitScript = Join-Path $sdkReactDir "scripts\init.js"
-      $initScript = if (Test-Path -Path $localInitScript -PathType Leaf) { $localInitScript } else { $sourceInitScript }
+      # Always prefer SDK source init.js (fresh template). node_modules can stay stale at 0.1.0.
+      $initScript = if (Test-Path -Path $sourceInitScript -PathType Leaf) { $sourceInitScript } else { $localInitScript }
 
       if (-not (Test-Path -Path $initScript -PathType Leaf)) {
-        throw "Script init TrustDev introuvable. Attendu: $localInitScript"
+        throw "Script init TrustDev introuvable. Attendu: $sourceInitScript"
       }
 
-      Push-Location $testAppDir
-      try {
-        Write-Host "Lancement init local: node `"$initScript`""
-        node $initScript
-        if ($LASTEXITCODE -ne 0) { throw "trustdev init a echoue." }
-      } finally {
-        Pop-Location
+      if ($ForceSdkInit) {
+        Write-Host "ForceSdkInit: regeneration de $trustdevComponentPath"
+        Write-Host "Script init: $initScript"
+      }
+
+      $initArgs = Build-TrustDevInitArgs -Mode $SdkInitMode -Pack $BlueprintPack -SinglePageTour:$SinglePageTour -ProjectDomain $ProjectDomain -TargetDir $testAppDir -NonInteractive:([bool]$SdkInitMode)
+      if ([string]::IsNullOrWhiteSpace($SdkInitMode)) {
+        Write-Warning "SdkInitMode non specifie : init interactif (choix heuristic/blueprints dans le terminal)."
+      } else {
+        $profileLabel = Get-TrustDevInitProfileLabel -Mode $SdkInitMode -Pack $BlueprintPack -SinglePageTour:$SinglePageTour.IsPresent
+        Write-Host "Profil init: mode=$profileLabel"
+      }
+
+      Write-Host ('Lancement init: node "{0}" {1}' -f $initScript, ($initArgs -join ' '))
+      & node $initScript @initArgs
+      if ($LASTEXITCODE -ne 0) { throw "trustdev init a echoue." }
+      if (Test-Path -LiteralPath $trustdevComponentPath) {
+        Write-Host "OK fichier ecrit: $trustdevComponentPath (modifie: $((Get-Item -LiteralPath $trustdevComponentPath).LastWriteTime))"
+      } else {
+        throw "Init termine mais fichier introuvable: $trustdevComponentPath"
       }
     }
   }
+
+  Write-TrustDevStackMarker -TestAppDir $testAppDir -TestProject $TestProject -SdkInitMode $(if ($SdkInitMode) { $SdkInitMode } else { "skipped" })
 
   if ($RefreshToken) {
     Invoke-Step "Refresh token SDK" {
@@ -265,14 +378,20 @@ try {
 
   Invoke-Step "Lancement Next $effectiveAppMode (nouveau terminal)" {
     $runCommand = if ($effectiveAppMode -eq "prod") { "npm run start" } else { "npm run dev" }
-    $appCmd = "cd /d `"$testAppDir`" && set NODE_OPTIONS=$env:NODE_OPTIONS && $runCommand"
+    $nodeOpts = [string]$env:NODE_OPTIONS
+    $innerCmd = if ([string]::IsNullOrWhiteSpace($nodeOpts)) {
+      $runCommand
+    } else {
+      ('set NODE_OPTIONS={0} && {1}' -f $nodeOpts, $runCommand)
+    }
+    $appCmd = Format-CmdExeChain -WorkDir $testAppDir -Command $innerCmd
     Start-Process -FilePath "cmd.exe" -ArgumentList "/k", $appCmd | Out-Null
     Write-Host "Next.js ($effectiveAppMode) en cours de demarrage sur http://localhost:$AppPort"
   }
 
   if ($StartTunnel) {
     Invoke-Step "Lancement tunnel (nouveau terminal)" {
-      $tunnelCmd = "cd /d `"$testAppDir`" && $TunnelCommand"
+      $tunnelCmd = Format-CmdExeChain -WorkDir $testAppDir -Command $TunnelCommand
       Start-Process -FilePath "cmd.exe" -ArgumentList "/k", $tunnelCmd | Out-Null
       Write-Host "Tunnel lance avec commande: $TunnelCommand"
     }
@@ -280,9 +399,13 @@ try {
 
   Write-Host ""
   Write-Host "Workflow termine."
-  Write-Host "Astuce: attends 5-10s, puis ouvre localhost et l'URL tunnel."
+  Write-Host "Astuce: attends 5-10s, puis ouvre localhost et l URL tunnel."
+  if (-not [string]::IsNullOrWhiteSpace($SdkInitMode)) {
+    $initLabel = Get-TrustDevInitProfileLabel -Mode $SdkInitMode -Pack $BlueprintPack -SinglePageTour:$SinglePageTour.IsPresent
+    Write-Host "Init SDK: $initLabel"
+  }
 }
 catch {
-  Write-Error "Echec restart-local-sdk-stack.ps1: $($_.Exception.Message)"
+  Write-Error ('Echec restart-local-sdk-stack.ps1: ' + $_.Exception.Message)
   exit 1
 }

@@ -23,6 +23,25 @@ function Resolve-ProjectPath([string]$PathValue) {
   return [System.IO.Path]::GetFullPath((Join-Path $script:ScriptRoot $PathValue))
 }
 
+function Extract-JwtOrganizationId([string]$Token) {
+  if ([string]::IsNullOrWhiteSpace($Token)) { return $null }
+  $parts = $Token.Split('.')
+  if ($parts.Count -lt 2) { return $null }
+
+  $payload = $parts[1]
+  $mod = $payload.Length % 4
+  if ($mod -gt 0) { $payload = $payload + ('=' * (4 - $mod)) }
+
+  try {
+    $bytes = [System.Convert]::FromBase64String($payload.Replace('-', '+').Replace('_', '/'))
+    $json = [System.Text.Encoding]::UTF8.GetString($bytes)
+    $parsed = $json | ConvertFrom-Json
+    return $parsed.organizationId
+  } catch {
+    return $null
+  }
+}
+
 function Extract-Token($LoginResponse) {
   if ($null -eq $LoginResponse) { return $null }
 
@@ -134,6 +153,12 @@ try {
   }
 
   Upsert-EnvValue -FilePath $resolvedEnvPath -Key "NEXT_PUBLIC_TRUSTDEV_SDK_TOKEN" -Value $token
+
+  $organizationId = Extract-JwtOrganizationId $token
+  if (-not [string]::IsNullOrWhiteSpace($organizationId)) {
+    Upsert-EnvValue -FilePath $resolvedEnvPath -Key "NEXT_PUBLIC_TRUSTDEV_ORGANIZATION_ID" -Value $organizationId
+    Write-Host "Organization ID synchronise depuis le JWT."
+  }
 
   Write-Host "Token SDK rafraichi avec succes."
   Write-Host "Pense a redemarrer l'app Next.js si elle etait deja lancee."
