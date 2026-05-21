@@ -28,10 +28,11 @@ param(
   [int]$AppPort = 3000,
   [switch]$KillBackendPort3020,
   [switch]$SkipSdkInit,
+  [switch]$SkipSdkReinstall,
   [switch]$ForceSdkInit,
   [ValidateSet("", "heuristic", "blueprints")]
   [string]$SdkInitMode = "",
-  [ValidateSet("fintech", "healthtech", "tech", "hr", "social", "elearning", "realestate", "multi-vertical")]
+  [ValidateSet("fintech", "healthtech", "tech", "hr", "social", "elearning", "realestate", "productivity", "multi-vertical")]
   [string]$BlueprintPack = "fintech",
   [switch]$SinglePageTour,
   [string]$ProjectDomain = "",
@@ -173,6 +174,65 @@ function Write-TrustDevStackMarker([string]$TestAppDir, [string]$TestProject, [s
   Set-Content -Path $markerPath -Value $marker -Encoding UTF8
 }
 
+function Invoke-NpmWithLog {
+  param([Parameter(Mandatory = $true)][string[]]$NpmArguments)
+
+  # npm envoie les warnings sur stderr ; avec $ErrorActionPreference Stop cela ne doit pas arreter le script.
+  $previousEap = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    & npm @NpmArguments 2>&1 | ForEach-Object {
+      if ($_ -is [System.Management.Automation.ErrorRecord]) {
+        Write-Host $_.ToString()
+      } else {
+        Write-Host $_
+      }
+    }
+    return [int]$LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousEap
+  }
+}
+
+function Install-TestAppSdkReact(
+  [string]$TestAppDir,
+  [string]$SdkReactDir,
+  [string]$SdkTgzPath
+) {
+  if (-not (Test-Path -LiteralPath $SdkTgzPath -PathType Leaf)) {
+    throw "Archive SDK introuvable apres npm pack: $SdkTgzPath"
+  }
+
+  $sdkPkgDir = Join-Path $TestAppDir "node_modules\@trustdev\onboarding-sdk-react"
+  if (Test-Path -LiteralPath $sdkPkgDir) {
+    Write-Host "Suppression de l ancien SDK dans node_modules..."
+    Remove-Item -LiteralPath $sdkPkgDir -Recurse -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+  }
+
+  Push-Location $TestAppDir
+  try {
+    Write-Host "npm install --force `"$SdkTgzPath`""
+    $exitCode = Invoke-NpmWithLog -NpmArguments @('install', '--force', $SdkTgzPath)
+    if ($exitCode -eq 0) {
+      Write-Host "SDK installe (exit 0)."
+      return
+    }
+
+    Write-Warning "npm install tgz a echoue (code $exitCode). Nouvel essai via lien file vers les sources SDK..."
+    $fileSpec = "file:$($SdkReactDir -replace '\\', '/')"
+    Write-Host "npm install --force `"$fileSpec`""
+    $exitCode = Invoke-NpmWithLog -NpmArguments @('install', '--force', $fileSpec)
+    if ($exitCode -ne 0) {
+      $msg = "npm install SDK a echoue (tgz et file). Verifie OneDrive sur node_modules. Reprends: npm install --force `"$SdkTgzPath`" dans $TestAppDir"
+      throw $msg
+    }
+    Write-Host "SDK installe via file: (exit 0)."
+  } finally {
+    Pop-Location
+  }
+}
+
 function Test-TrustDevSdkInitialized([string]$TestAppDir) {
   $componentPath = Join-Path $TestAppDir "components\trustdev\trustdev-onboarding.tsx"
   $envPath = Join-Path $TestAppDir ".env.local"
@@ -266,25 +326,30 @@ try {
     }
   }
 
-  Invoke-Step "Build + pack SDK React local" {
-    Push-Location $sdkReactDir
-    try {
-      npm run build
-      if ($LASTEXITCODE -ne 0) { throw "npm run build a echoue." }
-      npm pack
-      if ($LASTEXITCODE -ne 0) { throw "npm pack a echoue." }
-    } finally {
-      Pop-Location
+  if (-not $SkipSdkReinstall) {
+    Invoke-Step "Build + pack SDK React local" {
+      Push-Location $sdkReactDir
+      try {
+        $buildExit = Invoke-NpmWithLog -NpmArguments @('run', 'build')
+        if ($buildExit -ne 0) { throw "npm run build a echoue (code $buildExit)." }
+        $packExit = Invoke-NpmWithLog -NpmArguments @('pack')
+        if ($packExit -ne 0) { throw "npm pack a echoue (code $packExit)." }
+        if (-not (Test-Path -LiteralPath $sdkTgzPath -PathType Leaf)) {
+          throw "Fichier attendu manquant: $sdkTgzPath"
+        }
+      } finally {
+        Pop-Location
+      }
     }
-  }
 
-  Invoke-Step "Reinstall SDK dans $TestProject" {
-    Push-Location $testAppDir
-    try {
-      npm install --force $sdkTgzPath
-      if ($LASTEXITCODE -ne 0) { throw "npm install tgz a echoue." }
-    } finally {
-      Pop-Location
+    Invoke-Step "Reinstall SDK dans $TestProject" {
+      Install-TestAppSdkReact -TestAppDir $testAppDir -SdkReactDir $sdkReactDir -SdkTgzPath $sdkTgzPath
+    }
+  } else {
+    Write-Host ""
+    Write-Host "==> Build/pack/reinstall SDK ignores (-SkipSdkReinstall)"
+    if (-not (Test-Path -LiteralPath $sdkTgzPath -PathType Leaf)) {
+      Write-Warning "tgz absent: $sdkTgzPath - le projet utilisera le SDK deja dans node_modules."
     }
   }
 
