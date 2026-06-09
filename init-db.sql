@@ -15,6 +15,14 @@ DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'action_type') 
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'step_type') THEN CREATE TYPE step_type AS ENUM ('tooltip', 'highlight', 'modal', 'form', 'tutorial', 'checklist'); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tour_user_state_status') THEN CREATE TYPE tour_user_state_status AS ENUM ('DISMISSED', 'COMPLETED', 'ELIGIBLE'); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tour_replay_policy') THEN CREATE TYPE tour_replay_policy AS ENUM ('never', 'after_period', 'always_on_new_version'); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tour_environment') THEN CREATE TYPE tour_environment AS ENUM ('sandbox', 'production'); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tour_sandbox_status') THEN CREATE TYPE tour_sandbox_status AS ENUM ('pending', 'approved', 'rejected', 'returned'); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid WHERE t.typname = 'tour_sandbox_status' AND e.enumlabel = 'returned') THEN ALTER TYPE tour_sandbox_status ADD VALUE 'returned'; END IF; END $$;
+DO $$ BEGIN
+  CREATE TYPE tour_access_mode AS ENUM ('view', 'collaborate');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid WHERE t.typname = 'tour_user_state_status' AND e.enumlabel = 'ELIGIBLE') THEN ALTER TYPE tour_user_state_status ADD VALUE 'ELIGIBLE'; END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'event_type') THEN CREATE TYPE event_type AS ENUM ('PAGE_VIEW', 'CLICK', 'SCROLL', 'HOVER', 'EXIT', 'FORM_SUBMIT', 'ERROR'); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'progress_status') THEN CREATE TYPE progress_status AS ENUM ('NOT_STARTED', 'IN_PROGRESS', 'COMPLETED', 'ABANDONED'); END IF; END $$;
@@ -64,10 +72,20 @@ CREATE TABLE IF NOT EXISTS users (
     reset_password_expires TIMESTAMP WITH TIME ZONE,
     last_login_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    edit_locked_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    edit_locked_at TIMESTAMP WITH TIME ZONE NULL,
+    edit_lock_expires_at TIMESTAMP WITH TIME ZONE NULL
 );
 
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'users' AND indexname = 'idx_users_email') THEN CREATE INDEX idx_users_email ON users(email); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'users' AND indexname = 'idx_users_edit_lock_expires') THEN CREATE INDEX idx_users_edit_lock_expires ON users(edit_lock_expires_at) WHERE edit_locked_by IS NOT NULL; END IF; END $$;
+
+ALTER TABLE organizations
+  ADD COLUMN IF NOT EXISTS edit_locked_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS edit_locked_at TIMESTAMP WITH TIME ZONE NULL,
+  ADD COLUMN IF NOT EXISTS edit_lock_expires_at TIMESTAMP WITH TIME ZONE NULL;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'organizations' AND indexname = 'idx_organizations_edit_lock_expires') THEN CREATE INDEX idx_organizations_edit_lock_expires ON organizations(edit_lock_expires_at) WHERE edit_locked_by IS NOT NULL; END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'users' AND indexname = 'idx_users_role') THEN CREATE INDEX idx_users_role ON users(role); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'users' AND indexname = 'idx_users_organization_id') THEN CREATE INDEX idx_users_organization_id ON users(organization_id); END IF; END $$;
 
@@ -117,11 +135,103 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='current_reset_version') THEN
     ALTER TABLE guided_tours ADD COLUMN current_reset_version INTEGER NOT NULL DEFAULT 0;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='developer_private') THEN
+    ALTER TABLE guided_tours ADD COLUMN developer_private BOOLEAN NOT NULL DEFAULT false;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='assigned_admin_ids') THEN
+    ALTER TABLE guided_tours ADD COLUMN assigned_admin_ids UUID[] NOT NULL DEFAULT '{}';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='assigned_to_admins_at') THEN
+    ALTER TABLE guided_tours ADD COLUMN assigned_to_admins_at TIMESTAMPTZ NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='edit_locked_by') THEN
+    ALTER TABLE guided_tours ADD COLUMN edit_locked_by UUID REFERENCES users(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='edit_locked_at') THEN
+    ALTER TABLE guided_tours ADD COLUMN edit_locked_at TIMESTAMPTZ NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='edit_lock_expires_at') THEN
+    ALTER TABLE guided_tours ADD COLUMN edit_lock_expires_at TIMESTAMPTZ NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='developer_submission_message') THEN
+    ALTER TABLE guided_tours ADD COLUMN developer_submission_message TEXT NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='developer_view_share_message') THEN
+    ALTER TABLE guided_tours ADD COLUMN developer_view_share_message TEXT NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='developer_view_share_message_at') THEN
+    ALTER TABLE guided_tours ADD COLUMN developer_view_share_message_at TIMESTAMPTZ NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='developer_collaborate_share_message') THEN
+    ALTER TABLE guided_tours ADD COLUMN developer_collaborate_share_message TEXT NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='developer_collaborate_share_message_at') THEN
+    ALTER TABLE guided_tours ADD COLUMN developer_collaborate_share_message_at TIMESTAMPTZ NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='environment') THEN
+    ALTER TABLE guided_tours ADD COLUMN environment tour_environment NOT NULL DEFAULT 'production';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='sandbox_status') THEN
+    ALTER TABLE guided_tours ADD COLUMN sandbox_status tour_sandbox_status NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='in_collaboration') THEN
+    ALTER TABLE guided_tours ADD COLUMN in_collaboration BOOLEAN NOT NULL DEFAULT false;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='production_managed_by_admin_id') THEN
+    ALTER TABLE guided_tours ADD COLUMN production_managed_by_admin_id UUID NULL REFERENCES users(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='is_sandbox_test_active') THEN
+    ALTER TABLE guided_tours ADD COLUMN is_sandbox_test_active BOOLEAN NOT NULL DEFAULT false;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='sandbox_rejection_reason') THEN
+    ALTER TABLE guided_tours ADD COLUMN sandbox_rejection_reason TEXT NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='sandbox_rejected_at') THEN
+    ALTER TABLE guided_tours ADD COLUMN sandbox_rejected_at TIMESTAMPTZ NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='sandbox_rejected_by') THEN
+    ALTER TABLE guided_tours ADD COLUMN sandbox_rejected_by UUID NULL REFERENCES users(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='sandbox_test_started_by') THEN
+    ALTER TABLE guided_tours ADD COLUMN sandbox_test_started_by UUID NULL;
+  END IF;
 END $$;
 
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'guided_tours' AND indexname = 'idx_tours_org_id') THEN CREATE INDEX idx_tours_org_id ON guided_tours(organization_id); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'guided_tours' AND indexname = 'idx_tours_active') THEN CREATE INDEX idx_tours_active ON guided_tours(is_active); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'guided_tours' AND indexname = 'idx_tours_target_url') THEN CREATE INDEX idx_tours_target_url ON guided_tours(target_url); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'guided_tours' AND indexname = 'idx_guided_tours_org_environment') THEN CREATE INDEX idx_guided_tours_org_environment ON guided_tours(organization_id, environment); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'guided_tours' AND indexname = 'idx_guided_tours_edit_lock_expires') THEN CREATE INDEX idx_guided_tours_edit_lock_expires ON guided_tours(edit_lock_expires_at) WHERE edit_locked_by IS NOT NULL; END IF; END $$;
+
+-- Partage parcours (lecture seule / collaboration sandbox)
+CREATE TABLE IF NOT EXISTS guided_tour_access_grants (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tour_id UUID NOT NULL REFERENCES guided_tours(id) ON DELETE CASCADE,
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    access_mode tour_access_mode NOT NULL,
+    granted_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tour_id, user_id)
+);
+
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'guided_tour_access_grants' AND indexname = 'idx_tour_access_grants_tour') THEN CREATE INDEX idx_tour_access_grants_tour ON guided_tour_access_grants(tour_id); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'guided_tour_access_grants' AND indexname = 'idx_tour_access_grants_user') THEN CREATE INDEX idx_tour_access_grants_user ON guided_tour_access_grants(user_id); END IF; END $$;
+
+-- Audit transferts propriété développeur
+CREATE TABLE IF NOT EXISTS guided_tour_developer_transfers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tour_id UUID NOT NULL REFERENCES guided_tours(id) ON DELETE CASCADE,
+    organization_id UUID NOT NULL,
+    from_user_id UUID NOT NULL,
+    to_user_id UUID NOT NULL,
+    transferred_by UUID NOT NULL,
+    reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'guided_tour_developer_transfers' AND indexname = 'idx_tour_developer_transfers_tour') THEN CREATE INDEX idx_tour_developer_transfers_tour ON guided_tour_developer_transfers(tour_id); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'guided_tour_developer_transfers' AND indexname = 'idx_tour_developer_transfers_org') THEN CREATE INDEX idx_tour_developer_transfers_org ON guided_tour_developer_transfers(organization_id); END IF; END $$;
 
 -- =====================================================
 -- TABLE: tour_user_states
@@ -132,6 +242,7 @@ CREATE TABLE IF NOT EXISTS tour_user_states (
     tour_id UUID NOT NULL REFERENCES guided_tours(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    environment tour_environment NOT NULL DEFAULT 'production',
     status tour_user_state_status NOT NULL,
     expires_at TIMESTAMP WITH TIME ZONE,
     next_eligible_at TIMESTAMP WITH TIME ZONE,
@@ -140,8 +251,32 @@ CREATE TABLE IF NOT EXISTS tour_user_states (
     last_seen_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    CONSTRAINT uq_tour_user_states_tour_user UNIQUE (tour_id, user_id)
+    CONSTRAINT uq_tour_user_states_tour_user_env UNIQUE (tour_id, user_id, environment)
 );
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tour_user_states' AND column_name='environment') THEN
+    ALTER TABLE tour_user_states ADD COLUMN environment tour_environment NOT NULL DEFAULT 'production';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'uq_tour_user_states_tour_user'
+  ) THEN
+    ALTER TABLE tour_user_states DROP CONSTRAINT uq_tour_user_states_tour_user;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'uq_tour_user_states_tour_user_env'
+  ) THEN
+    ALTER TABLE tour_user_states
+      ADD CONSTRAINT uq_tour_user_states_tour_user_env UNIQUE (tour_id, user_id, environment);
+  END IF;
+  UPDATE tour_user_states tus
+  SET environment = 'sandbox'
+  FROM guided_tours gt
+  WHERE tus.tour_id = gt.id
+    AND gt.environment = 'sandbox'
+    AND tus.environment = 'production';
+END $$;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tour_user_states' AND column_name='expires_at') THEN
     ALTER TABLE tour_user_states ADD COLUMN expires_at TIMESTAMP WITH TIME ZONE;
@@ -162,6 +297,7 @@ END $$;
 
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'tour_user_states' AND indexname = 'idx_tour_user_states_org_user') THEN CREATE INDEX idx_tour_user_states_org_user ON tour_user_states(organization_id, user_id); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'tour_user_states' AND indexname = 'idx_tour_user_states_tour_id') THEN CREATE INDEX idx_tour_user_states_tour_id ON tour_user_states(tour_id); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'tour_user_states' AND indexname = 'idx_tour_user_states_tour_user_env') THEN CREATE INDEX idx_tour_user_states_tour_user_env ON tour_user_states(tour_id, user_id, environment); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'tour_user_states' AND indexname = 'idx_tour_user_states_next_eligible_at') THEN CREATE INDEX idx_tour_user_states_next_eligible_at ON tour_user_states(next_eligible_at); END IF; END $$;
 
 -- =====================================================
@@ -611,3 +747,79 @@ WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'admin@trustdev.local')
   AND EXISTS (
     SELECT 1 FROM organizations WHERE api_key = 'dev-local-onboarding-api-key-seed'
   );
+
+-- =====================================================
+-- Custom journey blueprints (dashboard + SDK remote fetch)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS organization_journey_blueprints (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    blueprint_id VARCHAR(128) NOT NULL,
+    vertical VARCHAR(32) NOT NULL,
+    is_published BOOLEAN NOT NULL DEFAULT false,
+    payload JSONB NOT NULL,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    edit_locked_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    edit_locked_at TIMESTAMP WITH TIME ZONE,
+    edit_lock_expires_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT uq_org_journey_blueprint_id UNIQUE (organization_id, blueprint_id)
+);
+
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'organization_journey_blueprints' AND indexname = 'idx_org_journey_blueprints_org_published') THEN
+  CREATE INDEX idx_org_journey_blueprints_org_published ON organization_journey_blueprints (organization_id, is_published);
+END IF; END $$;
+
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'organization_journey_blueprints' AND indexname = 'idx_org_journey_blueprints_edit_lock_expires') THEN
+  CREATE INDEX idx_org_journey_blueprints_edit_lock_expires ON organization_journey_blueprints (edit_lock_expires_at) WHERE edit_locked_by IS NOT NULL;
+END IF; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE blueprint_access_mode AS ENUM ('modify', 'publish');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE TABLE IF NOT EXISTS organization_journey_blueprint_access_grants (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    blueprint_row_id UUID NOT NULL REFERENCES organization_journey_blueprints(id) ON DELETE CASCADE,
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    access_mode blueprint_access_mode NOT NULL,
+    granted_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT uq_blueprint_access_grant_user_mode UNIQUE (blueprint_row_id, user_id, access_mode)
+);
+
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'organization_journey_blueprint_access_grants' AND indexname = 'idx_blueprint_access_grants_row') THEN
+  CREATE INDEX idx_blueprint_access_grants_row ON organization_journey_blueprint_access_grants (blueprint_row_id);
+END IF; END $$;
+
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'organization_journey_blueprint_access_grants' AND indexname = 'idx_blueprint_access_grants_user') THEN
+  CREATE INDEX idx_blueprint_access_grants_user ON organization_journey_blueprint_access_grants (user_id);
+END IF; END $$;
+
+DROP TRIGGER IF EXISTS update_organization_journey_blueprints_updated_at ON organization_journey_blueprints;
+CREATE TRIGGER update_organization_journey_blueprints_updated_at
+  BEFORE UPDATE ON organization_journey_blueprints
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- SDK integration tokens (PAT) for embedded apps
+CREATE TABLE IF NOT EXISTS sdk_integration_tokens (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    name VARCHAR(120) NOT NULL,
+    token_hash VARCHAR(64) NOT NULL UNIQUE,
+    token_suffix VARCHAR(12) NOT NULL,
+    scopes JSONB NOT NULL DEFAULT '[]',
+    revoked_at TIMESTAMP WITH TIME ZONE,
+    last_used_at TIMESTAMP WITH TIME ZONE,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'sdk_integration_tokens' AND indexname = 'idx_sdk_tokens_org_active') THEN
+  CREATE INDEX idx_sdk_tokens_org_active ON sdk_integration_tokens (organization_id, revoked_at);
+END IF; END $$;

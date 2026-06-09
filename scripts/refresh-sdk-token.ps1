@@ -13,7 +13,13 @@ param(
 
   [string]$TestProject = "test_1",
 
-  [string]$EnvFilePath = "..\..\e2e_sdk_tests\react\test_1\.env.local"
+  [string]$EnvFilePath = "..\..\e2e_sdk_tests\react\test_1\.env.local",
+
+  # Create a scoped integration token (td_sdk_...) instead of copying the session JWT.
+  [switch]$UseIntegrationToken,
+
+  # Add tours:publish scope (ADMIN login only — ignored server-side for DEVELOPER).
+  [switch]$IncludePublishScope
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,6 +31,7 @@ function Resolve-ProjectPath([string]$PathValue) {
 
 function Extract-JwtOrganizationId([string]$Token) {
   if ([string]::IsNullOrWhiteSpace($Token)) { return $null }
+  if ($Token.StartsWith("td_sdk_")) { return $null }
   $parts = $Token.Split('.')
   if ($parts.Count -lt 2) { return $null }
 
@@ -147,21 +154,61 @@ try {
     -Attempts ([Math]::Max(1, $MaxRetries)) `
     -DelayMs ([Math]::Max(200, $RetryDelayMs))
 
-  $token = Extract-Token $response
-  if ([string]::IsNullOrWhiteSpace($token)) {
+  $sessionJwt = Extract-Token $response
+  if ([string]::IsNullOrWhiteSpace($sessionJwt)) {
     throw "Token introuvable dans la reponse /auth/login."
   }
 
-  Upsert-EnvValue -FilePath $resolvedEnvPath -Key "NEXT_PUBLIC_TRUSTDEV_SDK_TOKEN" -Value $token
+  $tokenToStore = $sessionJwt
 
-  $organizationId = Extract-JwtOrganizationId $token
-  if (-not [string]::IsNullOrWhiteSpace($organizationId)) {
-    Upsert-EnvValue -FilePath $resolvedEnvPath -Key "NEXT_PUBLIC_TRUSTDEV_ORGANIZATION_ID" -Value $organizationId
-    Write-Host "Organization ID synchronise depuis le JWT."
+  if ($UseIntegrationToken) {
+    $scopes = @(
+      "tours:runtime",
+      "tours:sandbox",
+      "blueprints:read",
+      "feedback:read",
+      "feedback:write",
+      "semantic:invoke"
+    )
+    if ($IncludePublishScope) {
+      $scopes += "tours:publish"
+    }
+
+    $createBody = @{
+      name = "e2e-$TestProject-$(Get-Date -Format 'yyyyMMdd-HHmm')"
+      scopes = $scopes
+    } | ConvertTo-Json
+
+    $createUrl = "$($ApiBaseUrl.TrimEnd('/'))/auth/sdk-tokens"
+    Write-Host "Creation token integration: $createUrl"
+
+    $createResp = Invoke-RestMethod `
+      -Uri $createUrl `
+      -Method Post `
+      -ContentType "application/json" `
+      -Headers @{ Authorization = "Bearer $sessionJwt" } `
+      -Body $createBody
+
+    if ([string]::IsNullOrWhiteSpace($createResp.token)) {
+      throw "Reponse /auth/sdk-tokens sans champ token."
+    }
+
+    $tokenToStore = $createResp.token
+    Write-Host "Token integration cree (prefix td_sdk_). Scopes: $($scopes -join ', ')"
+  } else {
+    Write-Warning "Mode JWT session: privilegie -UseIntegrationToken pour un token scope limite."
   }
 
-  Write-Host "Token SDK rafraichi avec succes."
-  Write-Host "Pense a redemarrer l'app Next.js si elle etait deja lancee."
+  Upsert-EnvValue -FilePath $resolvedEnvPath -Key "NEXT_PUBLIC_TRUSTDEV_SDK_TOKEN" -Value $tokenToStore
+
+  $organizationId = Extract-JwtOrganizationId $sessionJwt
+  if (-not [string]::IsNullOrWhiteSpace($organizationId)) {
+    Upsert-EnvValue -FilePath $resolvedEnvPath -Key "NEXT_PUBLIC_TRUSTDEV_ORGANIZATION_ID" -Value $organizationId
+    Write-Host "Organization ID synchronise depuis le JWT de session."
+  }
+
+  Write-Host "NEXT_PUBLIC_TRUSTDEV_SDK_TOKEN mis a jour."
+  Write-Host "Redemarrez l'app Next.js si elle etait deja lancee."
 }
 catch {
   Write-Error "Echec refresh token: $($_.Exception.Message)"

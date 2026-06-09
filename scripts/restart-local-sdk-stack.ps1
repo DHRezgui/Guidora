@@ -3,18 +3,22 @@
   Build SDK, (re)init test app, refresh token, start Next.js + optional tunnel.
 
 .EXAMPLE
-  # Heuristique + singlePageTour (test_9 / test_10)
-  .\restart-local-sdk-stack.ps1 -TestProject test_10 -SdkInitMode heuristic -SinglePageTour `
+  # Auto (defaut) — resolution-first blueprint + hybrid
+  .\restart-local-sdk-stack.ps1 -TestProject test_11 -RefreshToken -Email "you@example.com" -Password "secret"
+
+.EXAMPLE
+  # Single-page heuristic chain (test_9 / test_10)
+  .\restart-local-sdk-stack.ps1 -TestProject test_10 -GenerationMode heuristic -SinglePageTour `
     -RefreshToken -Email "you@example.com" -Password "secret"
 
 .EXAMPLE
-  # Blueprints (test_6)
-  .\restart-local-sdk-stack.ps1 -TestProject test_6 -SdkInitMode blueprints -BlueprintPack fintech `
+  # Blueprint pack fixe (test_6 / test_7)
+  .\restart-local-sdk-stack.ps1 -TestProject test_6 -GenerationMode blueprints -BlueprintPack fintech `
     -RefreshToken -Email "you@example.com" -Password "secret"
 
 .EXAMPLE
-  # Relance sans re-init (projet deja configure)
-  .\restart-local-sdk-stack.ps1 -TestProject test_10 -SdkInitMode heuristic -SinglePageTour -SkipSdkInit `
+  # Relance sans re-init
+  .\restart-local-sdk-stack.ps1 -TestProject test_11 -SkipSdkInit `
     -RefreshToken -Email "you@example.com" -Password "secret"
 #>
 param(
@@ -30,8 +34,8 @@ param(
   [switch]$SkipSdkInit,
   [switch]$SkipSdkReinstall,
   [switch]$ForceSdkInit,
-  [ValidateSet("", "heuristic", "blueprints")]
-  [string]$SdkInitMode = "",
+  [ValidateSet("", "auto", "heuristic", "blueprints", "blueprint")]
+  [string]$GenerationMode = "auto",
   [ValidateSet("fintech", "healthtech", "tech", "hr", "social", "elearning", "realestate", "productivity", "multi-vertical")]
   [string]$BlueprintPack = "fintech",
   [switch]$SinglePageTour,
@@ -131,16 +135,18 @@ function Build-TrustDevInitArgs(
   if (-not [string]::IsNullOrWhiteSpace($TargetDir)) {
     $initArgs += "--target-dir=$TargetDir"
   }
-  if (-not [string]::IsNullOrWhiteSpace($Mode)) {
-    $initArgs += "--mode=$Mode"
-    if ($Mode -eq "blueprints" -and -not [string]::IsNullOrWhiteSpace($Pack)) {
-      $initArgs += "--pack=$Pack"
-    }
-    if ($Mode -eq "heuristic") {
-      if ($SinglePageTour) { $initArgs += "--single-page-tour" }
-      if (-not [string]::IsNullOrWhiteSpace($ProjectDomain)) {
-        $initArgs += "--project-domain=$ProjectDomain"
-      }
+  $mode = $Mode
+  if ($mode -eq "blueprint") { $mode = "blueprints" }
+  if ([string]::IsNullOrWhiteSpace($mode)) { $mode = "auto" }
+
+  $initArgs += "--mode=$mode"
+  if ($mode -eq "blueprints" -and -not [string]::IsNullOrWhiteSpace($Pack)) {
+    $initArgs += "--pack=$Pack"
+  }
+  if ($mode -in @("auto", "heuristic")) {
+    if ($SinglePageTour) { $initArgs += "--single-page-tour" }
+    if (-not [string]::IsNullOrWhiteSpace($ProjectDomain)) {
+      $initArgs += "--project-domain=$ProjectDomain"
     }
   }
   return $initArgs
@@ -156,18 +162,26 @@ function Get-TrustDevInitProfileLabel(
   [bool]$SinglePageTour
 ) {
   $label = $Mode
-  if ($Mode -eq "blueprints") { $label += " / $Pack" }
-  if ($SinglePageTour -and $Mode -eq "heuristic") { $label += " / singlePageTour" }
+  if ($Mode -eq "blueprint") { $label = "blueprints" }
+  if ($label -eq "blueprints") { $label += " / $Pack" }
+  if ($SinglePageTour -and $label -match "^(auto|heuristic)") { $label += " / singlePageTour" }
   return $label
 }
 
-function Write-TrustDevStackMarker([string]$TestAppDir, [string]$TestProject, [string]$SdkInitMode) {
+function Write-TrustDevStackMarker([string]$TestAppDir, [string]$TestProject, [string]$GenerationMode) {
   $markerPath = Join-Path $TestAppDir ".trustdev-stack.json"
   $flowSlug = ($TestProject -replace '_', '-').ToLowerInvariant()
-  $flowVersionHint = if ($SdkInitMode -eq "heuristic" -and $SinglePageTour) { "$flowSlug-single-v1" } elseif ($SdkInitMode -eq "heuristic") { "$flowSlug-v1" } else { "$flowSlug-blueprints-v1" }
+  $flowVersionHint = if ($GenerationMode -match "heuristic|auto" -and $SinglePageTour) {
+    "$flowSlug-single-v1"
+  } elseif ($GenerationMode -match "heuristic|auto") {
+    "$flowSlug-v1"
+  } else {
+    "$flowSlug-blueprints-v1"
+  }
   $marker = @{
     testProject = $TestProject
-    sdkInitMode = $SdkInitMode
+    generationMode = $GenerationMode
+    sdkInitMode = $GenerationMode
     flowVersionHint = $flowVersionHint
     updatedAt = (Get-Date).ToString("o")
   } | ConvertTo-Json -Depth 3
@@ -378,13 +392,10 @@ try {
         Write-Host "Script init: $initScript"
       }
 
-      $initArgs = Build-TrustDevInitArgs -Mode $SdkInitMode -Pack $BlueprintPack -SinglePageTour:$SinglePageTour -ProjectDomain $ProjectDomain -TargetDir $testAppDir -NonInteractive:([bool]$SdkInitMode)
-      if ([string]::IsNullOrWhiteSpace($SdkInitMode)) {
-        Write-Warning "SdkInitMode non specifie : init interactif (choix heuristic/blueprints dans le terminal)."
-      } else {
-        $profileLabel = Get-TrustDevInitProfileLabel -Mode $SdkInitMode -Pack $BlueprintPack -SinglePageTour:$SinglePageTour.IsPresent
-        Write-Host "Profil init: mode=$profileLabel"
-      }
+      $initMode = if ($GenerationMode -eq "blueprint") { "blueprints" } else { $GenerationMode }
+      $initArgs = Build-TrustDevInitArgs -Mode $initMode -Pack $BlueprintPack -SinglePageTour:$SinglePageTour -ProjectDomain $ProjectDomain -TargetDir $testAppDir -NonInteractive:$true
+      $profileLabel = Get-TrustDevInitProfileLabel -Mode $initMode -Pack $BlueprintPack -SinglePageTour:$SinglePageTour.IsPresent
+      Write-Host "Profil init: mode=$profileLabel"
 
       Write-Host ('Lancement init: node "{0}" {1}' -f $initScript, ($initArgs -join ' '))
       & node $initScript @initArgs
@@ -397,7 +408,8 @@ try {
     }
   }
 
-  Write-TrustDevStackMarker -TestAppDir $testAppDir -TestProject $TestProject -SdkInitMode $(if ($SdkInitMode) { $SdkInitMode } else { "skipped" })
+  $markerMode = if ($SkipSdkInit) { "skipped" } else { $(if ($GenerationMode -eq "blueprint") { "blueprints" } else { $GenerationMode }) }
+  Write-TrustDevStackMarker -TestAppDir $testAppDir -TestProject $TestProject -GenerationMode $markerMode
 
   if ($RefreshToken) {
     Invoke-Step "Refresh token SDK" {
@@ -465,8 +477,9 @@ try {
   Write-Host ""
   Write-Host "Workflow termine."
   Write-Host "Astuce: attends 5-10s, puis ouvre localhost et l URL tunnel."
-  if (-not [string]::IsNullOrWhiteSpace($SdkInitMode)) {
-    $initLabel = Get-TrustDevInitProfileLabel -Mode $SdkInitMode -Pack $BlueprintPack -SinglePageTour:$SinglePageTour.IsPresent
+  if (-not $SkipSdkInit) {
+    $summaryMode = if ($GenerationMode -eq "blueprint") { "blueprints" } else { $GenerationMode }
+    $initLabel = Get-TrustDevInitProfileLabel -Mode $summaryMode -Pack $BlueprintPack -SinglePageTour:$SinglePageTour.IsPresent
     Write-Host "Init SDK: $initLabel"
   }
 }

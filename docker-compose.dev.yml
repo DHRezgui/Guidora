@@ -1,4 +1,4 @@
-﻿# Full-stack dev (postgres + Nest backend + Next dashboard), same layout as TrustDev .docker/develop compose files.
+# Full-stack dev (postgres + Nest backend + Next dashboard), same layout as TrustDev .docker/develop compose files.
 services:
   postgres:
     image: postgres:15-alpine
@@ -130,6 +130,10 @@ services:
       INTERNAL_API_URL: ${INTERNAL_API_URL:-http://backend:3000/api/v1}
       NODE_ENV: development
       NEXT_TELEMETRY_DISABLED: '1'
+      # Bind mount Windows/Docker : le watcher natif rate les sous-dossiers app/**/*
+      WATCHPACK_POLLING: 'true'
+      CHOKIDAR_USEPOLLING: 'true'
+      WATCHPACK_POLLING_INTERVAL: '500'
     ports:
       - '${DASHBOARD_HOST_PORT:-3021}:3000'
     depends_on:
@@ -137,9 +141,19 @@ services:
     volumes:
       - ./dashboard:/app
       - ./sdks/react:/sdks/react
+      # SDK visible sous /app/sdks pour que Turbopack (root=/app) résolve @sdk et les imports relatifs.
+      - ./sdks/react:/app/sdks/react
       - /app/node_modules
-      - /app/.next
-    command: npm run dev
+      # Cache Turbopack sur FS Linux natif (évite corruption routes.d.ts sur bind mount Windows/VirtioFS).
+      # dev:clean efface .next à chaque démarrage conteneur ; le garde-fou le régénère si corruption en cours de session.
+      - dashboard_next_cache:/app/.next
+    command: npm run dev:clean
+    healthcheck:
+      test: ['CMD', 'node', 'scripts/healthcheck-create-route.mjs']
+      interval: 20s
+      timeout: 50s
+      retries: 10
+      start_period: 120s
     networks:
       - trustdev-network
     restart: unless-stopped
@@ -149,6 +163,7 @@ volumes:
   redis_data:
   rabbitmq_data:
   pgadmin_data:
+  dashboard_next_cache:
 
 networks:
   trustdev-network:
