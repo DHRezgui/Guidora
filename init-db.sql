@@ -8,7 +8,12 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- TYPES ENUM (version sécurisée - idempotente)
 -- =====================================================
 
-DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN CREATE TYPE user_role AS ENUM ('ADMIN', 'DEVELOPER', 'USER'); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN CREATE TYPE user_role AS ENUM ('SUPER_ADMIN', 'ADMIN', 'DEVELOPER', 'USER'); END IF; END $$;
+DO $$ BEGIN
+  ALTER TYPE user_role ADD VALUE 'SUPER_ADMIN';
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'plan_type') THEN CREATE TYPE plan_type AS ENUM ('FREE', 'STARTER', 'PRO', 'ENTERPRISE'); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'position_type') THEN CREATE TYPE position_type AS ENUM ('TOP', 'BOTTOM', 'LEFT', 'RIGHT', 'CENTER', 'TOP_LEFT', 'TOP_RIGHT', 'BOTTOM_LEFT', 'BOTTOM_RIGHT'); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'action_type') THEN CREATE TYPE action_type AS ENUM ('CLICK', 'HOVER', 'SCROLL', 'NEXT', 'SKIP', 'COMPLETE'); END IF; END $$;
@@ -739,14 +744,17 @@ SELECT '00000000-0000-0000-0000-000000000002'::uuid,
        '$2b$10$p8v2xrIqueT3UG8NE5mf.O0jPEzEF21sY9s5bWcqyBgDgVtx/qvCu',
        'Admin',
        'Seed',
-       'ADMIN'::user_role,
-       (SELECT id FROM organizations WHERE api_key = 'dev-local-onboarding-api-key-seed' LIMIT 1),
+       'SUPER_ADMIN'::user_role,
+       NULL,
        true,
        true
-WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'admin@trustdev.local')
-  AND EXISTS (
-    SELECT 1 FROM organizations WHERE api_key = 'dev-local-onboarding-api-key-seed'
-  );
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'admin@trustdev.local');
+
+UPDATE users
+SET role = 'SUPER_ADMIN'::user_role,
+    organization_id = NULL
+WHERE email = 'admin@trustdev.local'
+  AND role = 'ADMIN'::user_role;
 
 -- =====================================================
 -- Custom journey blueprints (dashboard + SDK remote fetch)
