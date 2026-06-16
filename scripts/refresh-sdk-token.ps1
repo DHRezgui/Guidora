@@ -13,13 +13,16 @@ param(
 
   [string]$TestProject = "test_1",
 
-  [string]$EnvFilePath = "..\..\e2e_sdk_tests\react\test_1\.env.local",
+  [string]$EnvFilePath = "",
 
-  # Create a scoped integration token (td_sdk_...) instead of copying the session JWT.
-  [switch]$UseIntegrationToken,
+  # Legacy: write session JWT into NEXT_PUBLIC_TRUSTDEV_SDK_TOKEN (deprecated).
+  [switch]$UseSessionJwt,
 
-  # Add tours:publish scope (ADMIN login only — ignored server-side for DEVELOPER).
-  [switch]$IncludePublishScope
+  # Omit tours:publish on the integration PAT (use -SkipPublishScope).
+  [switch]$SkipPublishScope,
+
+  # Also sync PAT into dashboard/.env.local for SDK Tests lab.
+  [switch]$SkipDashboardEnvSync
 )
 
 $ErrorActionPreference = "Stop"
@@ -70,19 +73,30 @@ function Extract-Token($LoginResponse) {
   return $null
 }
 
+function Extract-OrganizationId($LoginResponse, [string]$SessionJwt) {
+  $fromUser = $LoginResponse.user.organizationId
+  if (-not [string]::IsNullOrWhiteSpace($fromUser)) {
+    return [string]$fromUser
+  }
+  return Extract-JwtOrganizationId $SessionJwt
+}
+
 function Upsert-EnvValue(
   [string]$FilePath,
   [string]$Key,
   [string]$Value
 ) {
-  if (-not (Test-Path $FilePath)) {
-    throw "Fichier introuvable: $FilePath"
+  $parentDir = Split-Path -Parent $FilePath
+  if (-not (Test-Path $parentDir)) {
+    New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
   }
 
   $lines = [System.Collections.Generic.List[string]]::new()
-  $existingLines = Get-Content -Path $FilePath -Encoding UTF8
-  foreach ($line in $existingLines) {
-    $lines.Add([string]$line)
+  if (Test-Path $FilePath) {
+    $existingLines = Get-Content -Path $FilePath -Encoding UTF8
+    foreach ($line in $existingLines) {
+      $lines.Add([string]$line)
+    }
   }
 
   $prefix = "$Key="
@@ -100,6 +114,24 @@ function Upsert-EnvValue(
   }
 
   Set-Content -Path $FilePath -Value $lines -Encoding UTF8
+}
+
+function Ensure-EnvDefaults([string]$FilePath) {
+  $defaults = @{
+    "NEXT_PUBLIC_TRUSTDEV_API_URL" = "http://localhost:3020/api/v1"
+    "NEXT_PUBLIC_TRUSTDEV_API_KEY" = "demo-local-key"
+    "NEXT_PUBLIC_TRUSTDEV_SEMANTIC_ENGINE_MODE" = "hybrid"
+  }
+  foreach ($entry in $defaults.GetEnumerator()) {
+    if (-not (Test-Path $FilePath)) {
+      Upsert-EnvValue -FilePath $FilePath -Key $entry.Key -Value $entry.Value
+      continue
+    }
+    $content = Get-Content -Path $FilePath -Raw -Encoding UTF8
+    if ($content -notmatch "(?m)^\s*$([regex]::Escape($entry.Key))\s*=") {
+      Upsert-EnvValue -FilePath $FilePath -Key $entry.Key -Value $entry.Value
+    }
+  }
 }
 
 function Invoke-LoginWithRetry(
@@ -132,16 +164,29 @@ function Invoke-LoginWithRetry(
   throw "Echec login API sans details."
 }
 
-try {
-  $resolvedEnvPath = if ($PSBoundParameters.ContainsKey("EnvFilePath")) {
-    Resolve-ProjectPath $EnvFilePath
-  } else {
-    Resolve-ProjectPath "..\..\e2e_sdk_tests\react\$TestProject\.env.local"
+function Sync-SdkPatEnvFile(
+  [string]$FilePath,
+  [string]$Token,
+  [string]$OrganizationId
+) {
+  Ensure-EnvDefaults -FilePath $FilePath
+  Upsert-EnvValue -FilePath $FilePath -Key "NEXT_PUBLIC_TRUSTDEV_SDK_TOKEN" -Value $Token
+  if (-not [string]::IsNullOrWhiteSpace($OrganizationId)) {
+    Upsert-EnvValue -FilePath $FilePath -Key "NEXT_PUBLIC_TRUSTDEV_ORGANIZATION_ID" -Value $OrganizationId
   }
+}
+
+try {
+  $resolvedEnvPath = if ([string]::IsNullOrWhiteSpace($EnvFilePath)) {
+    Resolve-ProjectPath "..\..\e2e_sdk_tests\react\$TestProject\.env.local"
+  } else {
+    Resolve-ProjectPath $EnvFilePath
+  }
+  $dashboardEnvPath = Resolve-ProjectPath "..\dashboard\.env.local"
   $loginUrl = "$($ApiBaseUrl.TrimEnd('/'))/auth/login"
 
   Write-Host "Login API: $loginUrl"
-  Write-Host "Mise a jour de: $resolvedEnvPath"
+  Write-Host "Mise a jour PAT e2e: $resolvedEnvPath"
 
   $body = @{
     email = $Email
@@ -159,9 +204,12 @@ try {
     throw "Token introuvable dans la reponse /auth/login."
   }
 
+  $organizationId = Extract-OrganizationId $response $sessionJwt
   $tokenToStore = $sessionJwt
 
-  if ($UseIntegrationToken) {
+  if ($UseSessionJwt) {
+    Write-Warning "Mode JWT session (deprecated). Preferez le PAT td_sdk_ par defaut."
+  } else {
     $scopes = @(
       "tours:runtime",
       "tours:sandbox",
@@ -170,7 +218,7 @@ try {
       "feedback:write",
       "semantic:invoke"
     )
-    if ($IncludePublishScope) {
+    if (-not $SkipPublishScope) {
       $scopes += "tours:publish"
     }
 
@@ -180,7 +228,7 @@ try {
     } | ConvertTo-Json
 
     $createUrl = "$($ApiBaseUrl.TrimEnd('/'))/auth/sdk-tokens"
-    Write-Host "Creation token integration: $createUrl"
+    Write-Host "Creation token integration (PAT): $createUrl"
 
     $createResp = Invoke-RestMethod `
       -Uri $createUrl `
@@ -193,22 +241,29 @@ try {
       throw "Reponse /auth/sdk-tokens sans champ token."
     }
 
+    if (-not $createResp.token.StartsWith("td_sdk_")) {
+      throw "Token integration inattendu (prefix td_sdk_ requis)."
+    }
+
     $tokenToStore = $createResp.token
-    Write-Host "Token integration cree (prefix td_sdk_). Scopes: $($scopes -join ', ')"
-  } else {
-    Write-Warning "Mode JWT session: privilegie -UseIntegrationToken pour un token scope limite."
+    Write-Host "PAT cree. Scopes: $($scopes -join ', ')"
   }
 
-  Upsert-EnvValue -FilePath $resolvedEnvPath -Key "NEXT_PUBLIC_TRUSTDEV_SDK_TOKEN" -Value $tokenToStore
+  Sync-SdkPatEnvFile -FilePath $resolvedEnvPath -Token $tokenToStore -OrganizationId $organizationId
+  Write-Host "NEXT_PUBLIC_TRUSTDEV_SDK_TOKEN mis a jour (e2e)."
 
-  $organizationId = Extract-JwtOrganizationId $sessionJwt
+  if (-not $SkipDashboardEnvSync -and -not $UseSessionJwt) {
+    Sync-SdkPatEnvFile -FilePath $dashboardEnvPath -Token $tokenToStore -OrganizationId $organizationId
+    Upsert-EnvValue -FilePath $dashboardEnvPath -Key "NEXT_PUBLIC_API_URL" -Value $ApiBaseUrl
+    Upsert-EnvValue -FilePath $dashboardEnvPath -Key "NEXT_PUBLIC_SDK_API_KEY" -Value "trustdev-sdk-tests"
+    Write-Host "Dashboard lab synchronise: $dashboardEnvPath"
+  }
+
   if (-not [string]::IsNullOrWhiteSpace($organizationId)) {
-    Upsert-EnvValue -FilePath $resolvedEnvPath -Key "NEXT_PUBLIC_TRUSTDEV_ORGANIZATION_ID" -Value $organizationId
-    Write-Host "Organization ID synchronise depuis le JWT de session."
+    Write-Host "Organization ID: $organizationId"
   }
 
-  Write-Host "NEXT_PUBLIC_TRUSTDEV_SDK_TOKEN mis a jour."
-  Write-Host "Redemarrez l'app Next.js si elle etait deja lancee."
+  Write-Host "Redemarrez l'app Next.js et le dashboard si ils etaient deja lances."
 }
 catch {
   Write-Error "Echec refresh token: $($_.Exception.Message)"

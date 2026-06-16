@@ -335,6 +335,7 @@ try {
     if ([string]::IsNullOrWhiteSpace($Email) -or [string]::IsNullOrWhiteSpace($Password)) {
       throw "Utilise -Email et -Password quand -RefreshToken est active."
     }
+    Write-Host "RefreshToken: creation d'un PAT td_sdk_ (scopes e2e + dashboard lab, publish sandbox)."
     if (-not (Test-PortListening -Port 3020)) {
       throw "Le backend API (port 3020) nest pas demarre. Demarre-le puis relance le script avec -RefreshToken."
     }
