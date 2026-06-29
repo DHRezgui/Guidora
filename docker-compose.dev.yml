@@ -97,6 +97,7 @@ services:
       PYTHON_EXECUTABLE: python3
       SEMANTIC_SCRIPT_PATH: /app/ml/rag/semantic_search.py
       FAQ_PYTHON_TIMEOUT_MS: ${FAQ_PYTHON_TIMEOUT_MS:-600000}
+      FAQ_ORG_STORAGE_DIR: /app/data/faq-orgs
       FAQ_ADAPTIVE_THRESHOLDS: ${FAQ_ADAPTIVE_THRESHOLDS:-0.7,0.65,0.6}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3021}
     depends_on:
@@ -108,7 +109,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
-      - ./ml:/app/ml:ro
+      - ./ml:/app/ml
       - /app/node_modules
     networks:
       - trustdev-network

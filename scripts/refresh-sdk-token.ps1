@@ -216,7 +216,8 @@ try {
       "blueprints:read",
       "feedback:read",
       "feedback:write",
-      "semantic:invoke"
+      "semantic:invoke",
+      "faq:search"
     )
     if (-not $SkipPublishScope) {
       $scopes += "tours:publish"

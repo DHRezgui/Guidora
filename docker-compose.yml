@@ -89,6 +89,7 @@ services:
         condition: service_started
     volumes:
       - ./ml:/app/ml:ro
+      - ./backend/data/faq-orgs:/app/data/faq-orgs
     networks:
       - trustdev-network
     restart: unless-stopped

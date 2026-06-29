@@ -474,8 +474,25 @@ CREATE TABLE IF NOT EXISTS faq_items (
     not_helpful_count INTEGER DEFAULT 0,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    edit_locked_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    edit_locked_at TIMESTAMP WITH TIME ZONE NULL,
+    edit_lock_expires_at TIMESTAMP WITH TIME ZONE NULL
 );
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'faq_items' AND column_name = 'edit_locked_by') THEN
+    ALTER TABLE faq_items ADD COLUMN edit_locked_by UUID REFERENCES users(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'faq_items' AND column_name = 'edit_locked_at') THEN
+    ALTER TABLE faq_items ADD COLUMN edit_locked_at TIMESTAMP WITH TIME ZONE NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'faq_items' AND column_name = 'edit_lock_expires_at') THEN
+    ALTER TABLE faq_items ADD COLUMN edit_lock_expires_at TIMESTAMP WITH TIME ZONE NULL;
+  END IF;
+END $$;
+
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'faq_items' AND indexname = 'idx_faq_items_edit_lock_expires') THEN CREATE INDEX idx_faq_items_edit_lock_expires ON faq_items(edit_lock_expires_at) WHERE edit_locked_by IS NOT NULL; END IF; END $$;
 
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'faq_items' AND indexname = 'idx_faq_org_id') THEN CREATE INDEX idx_faq_org_id ON faq_items(organization_id); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'faq_items' AND indexname = 'idx_faq_category') THEN CREATE INDEX idx_faq_category ON faq_items(category); END IF; END $$;
