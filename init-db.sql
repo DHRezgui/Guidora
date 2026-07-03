@@ -464,6 +464,7 @@ DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' 
 CREATE TABLE IF NOT EXISTS faq_items (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    project_key VARCHAR(120) NOT NULL DEFAULT 'default',
     question TEXT NOT NULL,
     answer TEXT NOT NULL,
     category VARCHAR(100),
@@ -474,6 +475,7 @@ CREATE TABLE IF NOT EXISTS faq_items (
     not_helpful_count INTEGER DEFAULT 0,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    content_updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     edit_locked_by UUID REFERENCES users(id) ON DELETE SET NULL,
     edit_locked_at TIMESTAMP WITH TIME ZONE NULL,
@@ -490,7 +492,16 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'faq_items' AND column_name = 'edit_lock_expires_at') THEN
     ALTER TABLE faq_items ADD COLUMN edit_lock_expires_at TIMESTAMP WITH TIME ZONE NULL;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'faq_items' AND column_name = 'project_key') THEN
+    ALTER TABLE faq_items ADD COLUMN project_key VARCHAR(120) NOT NULL DEFAULT 'default';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'faq_items' AND column_name = 'content_updated_at') THEN
+    ALTER TABLE faq_items ADD COLUMN content_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    UPDATE faq_items SET content_updated_at = created_at;
+  END IF;
 END $$;
+
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'faq_items' AND indexname = 'idx_faq_org_project') THEN CREATE INDEX idx_faq_org_project ON faq_items(organization_id, project_key); END IF; END $$;
 
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'faq_items' AND indexname = 'idx_faq_items_edit_lock_expires') THEN CREATE INDEX idx_faq_items_edit_lock_expires ON faq_items(edit_lock_expires_at) WHERE edit_locked_by IS NOT NULL; END IF; END $$;
 
@@ -499,6 +510,20 @@ DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' 
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'faq_items' AND indexname = 'idx_faq_active') THEN CREATE INDEX idx_faq_active ON faq_items(is_active); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'faq_items' AND indexname = 'idx_faq_search') THEN CREATE INDEX idx_faq_search ON faq_items USING GIN (to_tsvector('english', question || ' ' || answer)); END IF; END $$;
 --DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'faq_items' AND indexname = 'idx_faq_embedding') THEN CREATE INDEX idx_faq_embedding ON faq_items USING ivfflat (embedding vector_cosine_ops); END IF; END $$;
+
+-- =====================================================
+-- TABLE: faq_projects
+-- Paquets FAQ enregistrés (visibles même sans question)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS faq_projects (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    project_key VARCHAR(120) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT uq_faq_projects_org_key UNIQUE (organization_id, project_key)
+);
+
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'faq_projects' AND indexname = 'idx_faq_projects_org') THEN CREATE INDEX idx_faq_projects_org ON faq_projects(organization_id); END IF; END $$;
 
 -- =====================================================
 -- TABLE: tutorials
