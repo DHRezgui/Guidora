@@ -217,7 +217,8 @@ try {
       "feedback:read",
       "feedback:write",
       "semantic:invoke",
-      "faq:search"
+      "faq:search",
+      "ml:predict"
     )
     if (-not $SkipPublishScope) {
       $scopes += "tours:publish"
