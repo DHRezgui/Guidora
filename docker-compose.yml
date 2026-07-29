@@ -80,6 +80,8 @@ services:
       - SEMANTIC_SCRIPT_PATH=/app/ml/rag/semantic_search.py
       - FAQ_PYTHON_TIMEOUT_MS=${FAQ_PYTHON_TIMEOUT_MS:-600000}
       - FAQ_ADAPTIVE_THRESHOLDS=${FAQ_ADAPTIVE_THRESHOLDS:-0.7,0.65,0.6}
+      - FAQ_LEXICAL_BOOST=${FAQ_LEXICAL_BOOST:-true}
+      - FAQ_FALLBACK_MIN_SCORE=${FAQ_FALLBACK_MIN_SCORE:-0.55}
     depends_on:
       postgres:
         condition: service_healthy

@@ -580,7 +580,9 @@ CREATE TABLE IF NOT EXISTS support_tickets (
     priority priority_level DEFAULT 'MEDIUM',
     assigned_to UUID REFERENCES users(id) ON DELETE SET NULL,
     page_url VARCHAR(500),
+    project_key VARCHAR(120) NOT NULL DEFAULT 'default',
     session_data JSONB DEFAULT '{}',
+    admin_replies JSONB NOT NULL DEFAULT '[]'::jsonb,
     resolved_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -591,6 +593,52 @@ DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' 
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'support_tickets' AND indexname = 'idx_tickets_status') THEN CREATE INDEX idx_tickets_status ON support_tickets(status); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'support_tickets' AND indexname = 'idx_tickets_priority') THEN CREATE INDEX idx_tickets_priority ON support_tickets(priority); END IF; END $$;
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'support_tickets' AND indexname = 'idx_tickets_assigned') THEN CREATE INDEX idx_tickets_assigned ON support_tickets(assigned_to); END IF; END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'support_tickets' AND column_name = 'project_key') THEN
+    ALTER TABLE support_tickets ADD COLUMN project_key VARCHAR(120) NOT NULL DEFAULT 'default';
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'support_tickets' AND column_name = 'admin_replies') THEN
+    ALTER TABLE support_tickets ADD COLUMN admin_replies JSONB NOT NULL DEFAULT '[]'::jsonb;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'support_tickets' AND column_name = 'deleted_at') THEN
+    ALTER TABLE support_tickets ADD COLUMN deleted_at TIMESTAMPTZ NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'support_tickets' AND column_name = 'deleted_by') THEN
+    ALTER TABLE support_tickets ADD COLUMN deleted_by UUID NULL REFERENCES users(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'support_tickets' AND column_name = 'collaborators') THEN
+    ALTER TABLE support_tickets ADD COLUMN collaborators JSONB NOT NULL DEFAULT '[]'::jsonb;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'support_tickets' AND column_name = 'edit_locked_by') THEN
+    ALTER TABLE support_tickets ADD COLUMN edit_locked_by UUID NULL REFERENCES users(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'support_tickets' AND column_name = 'edit_locked_at') THEN
+    ALTER TABLE support_tickets ADD COLUMN edit_locked_at TIMESTAMPTZ NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'support_tickets' AND column_name = 'edit_lock_expires_at') THEN
+    ALTER TABLE support_tickets ADD COLUMN edit_lock_expires_at TIMESTAMPTZ NULL;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'support_tickets' AND column_name = 'assigned_at') THEN
+    ALTER TABLE support_tickets ADD COLUMN assigned_at TIMESTAMPTZ NULL;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'support_tickets' AND column_name = 'lifecycle_history') THEN
+    ALTER TABLE support_tickets ADD COLUMN lifecycle_history JSONB NOT NULL DEFAULT '[]'::jsonb;
+  END IF;
+END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'support_tickets' AND indexname = 'idx_tickets_org_project') THEN CREATE INDEX idx_tickets_org_project ON support_tickets(organization_id, project_key); END IF; END $$;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'support_tickets' AND indexname = 'idx_tickets_edit_lock_expires') THEN CREATE INDEX idx_tickets_edit_lock_expires ON support_tickets(edit_lock_expires_at) WHERE edit_locked_by IS NOT NULL; END IF; END $$;
 
 -- =====================================================
 -- TABLE: analytics
