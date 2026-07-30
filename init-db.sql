@@ -182,6 +182,9 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='in_collaboration') THEN
     ALTER TABLE guided_tours ADD COLUMN in_collaboration BOOLEAN NOT NULL DEFAULT false;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='show_in_guides') THEN
+    ALTER TABLE guided_tours ADD COLUMN show_in_guides BOOLEAN NOT NULL DEFAULT false;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guided_tours' AND column_name='production_managed_by_admin_id') THEN
     ALTER TABLE guided_tours ADD COLUMN production_managed_by_admin_id UUID NULL REFERENCES users(id) ON DELETE SET NULL;
   END IF;
