@@ -3,8 +3,11 @@
 /dist
 .idea/
 .cursor/
+.worktrees/
+/docs/
 # Docker & BDD
 .env
+.venv/
 !.env.example
 docker-compose.override.yml
 
