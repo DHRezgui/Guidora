@@ -3,6 +3,38 @@
 Guidora is a multi-tenant platform for creating and delivering guided tours,
 contextual help, searchable FAQs, and proactive in-app assistance.
 
+## What is Guidora?
+
+Software users often get stuck when they encounter an unfamiliar screen,
+cannot find the next action, or need an answer while completing a task.
+Guidora helps product teams support users directly inside their web
+application, without sending them to a separate help center or requiring a
+support agent for every question.
+
+With Guidora, a product team can:
+
+- create guided tours that explain a workflow step by step;
+- display contextual help and searchable FAQs next to the current task;
+- collect interaction and friction signals from the user journey;
+- identify users who may abandon a workflow and offer proactive assistance;
+- manage tours, content, organizations, projects, and SDK access from a central
+  dashboard.
+
+## How it works
+
+1. An administrator creates and publishes a tour or help content in the
+	dashboard.
+2. A developer integrates the React SDK into the product application.
+3. The SDK displays the relevant tour, FAQ, or contextual suggestion in the
+	user's current interface.
+4. The backend stores configuration and interaction events, and serves the
+	appropriate content to each organization and project.
+5. Optional ML services analyze friction and abandonment risk so the product
+	can offer help at the right moment.
+
+Guidora is designed for SaaS product teams, developers integrating in-app
+experiences, and end users who need guidance while completing a workflow.
+
 This repository is the local integration workspace for the Guidora services.
 
 | Component | Repository | Purpose |
