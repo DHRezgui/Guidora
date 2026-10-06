@@ -106,10 +106,10 @@ Add `-v` only when you intentionally want to delete local service volumes.
 
 ## Component development
 
-- [Backend development](backend/README.md)
-- [Dashboard development](dashboard/README.md)
-- [ML development](ml/README.md)
-- [React SDK development](sdks/react/README.md)
+- [Backend development](https://github.com/DHRezgui/Guidora-backend/blob/newDevelop/README.md)
+- [Dashboard development](https://github.com/DHRezgui/Guidora-dashboard/blob/newDevelop/README.md)
+- [ML development](https://github.com/DHRezgui/Guidora-ml/blob/newDevelop/README.md)
+- [React SDK development](https://github.com/DHRezgui/Guidora-sdk/blob/newDevelop/react/README.md)
 
 The `docs/` directory is local project documentation and is intentionally not
 part of this public repository.
