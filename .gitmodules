@@ -1,15 +1,12 @@
 [submodule "dashboard"]
 	path = dashboard
-	url = https://gitlab.trustdev.info/pfe2026/module-intelligent-onboarding-et-decouverte/dashboard.git
+	url = https://github.com/DHRezgui/guidora-dashboard.git
 [submodule "backend"]
 	path = backend
-	url = https://gitlab.trustdev.info/pfe2026/module-intelligent-onboarding-et-decouverte/backend.git
-[submodule "docs"]
-	path = docs
-	url = https://gitlab.trustdev.info/pfe2026/module-intelligent-onboarding-et-decouverte/docs.git
+	url = https://github.com/DHRezgui/guidora-backend.git
 [submodule "ml"]
 	path = ml
-	url = https://gitlab.trustdev.info/pfe2026/module-intelligent-onboarding-et-decouverte/ml.git
+	url = https://github.com/DHRezgui/guidora-ml.git
 [submodule "sdks"]
 	path = sdks
-	url = https://gitlab.trustdev.info/pfe2026/module-intelligent-onboarding-et-decouverte/sdks.git
+	url = https://github.com/DHRezgui/guidora-sdks.git
